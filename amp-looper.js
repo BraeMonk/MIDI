@@ -470,3 +470,8 @@ function updateLooperRecTimer() {
   const t = document.getElementById('looper-rec-timer');
   if (t) t.textContent = m + ':' + s;
 }
+
+// app.js executes init() before this file loads, so window.initAmp/initLooper
+// are not set in time. Call them directly here instead.
+initAmp();
+initLooper();
