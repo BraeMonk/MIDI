@@ -178,6 +178,19 @@ function updateAmpParams() {
   outGain.gain.value  = state.amp.on ? (state.amp.volume / 100) : 0;
 }
 
+// iOS Safari sometimes won't fire 'click' when ancestors have user-select:none.
+// This helper fires on touchend (with no movement) AND click, whichever comes first.
+function onTap(el, fn) {
+  if (!el) return;
+  let moved = false;
+  el.addEventListener('touchstart', function() { moved = false; }, { passive: true });
+  el.addEventListener('touchmove',  function() { moved = true;  }, { passive: true });
+  el.addEventListener('touchend', function(e) {
+    if (!moved) { e.preventDefault(); fn(e); }
+  });
+  el.addEventListener('click', fn);
+}
+
 function initAmp() {
   state.amp = {
     on: false, voice: 'clean', drive: 35, bass: 0, mid: 0, treble: 0,
@@ -187,14 +200,14 @@ function initAmp() {
 
   ampLog('Tap ⚡ to connect your input.', 'msg');
 
-  document.getElementById('amp-connect-default').addEventListener('click', connectDefaultInput);
-  document.getElementById('amp-input-refresh').addEventListener('click', refreshAmpInputDevices);
+  onTap(document.getElementById('amp-connect-default'), connectDefaultInput);
+  onTap(document.getElementById('amp-input-refresh'), refreshAmpInputDevices);
   document.getElementById('amp-input-select').addEventListener('change', function(e) {
     if (e.target.value) connectAmpInput(e.target.value);
   });
 
   document.querySelectorAll('#amp-voice-group .pill').forEach(function(btn) {
-    btn.addEventListener('click', function() {
+    onTap(btn, function() {
       document.querySelectorAll('#amp-voice-group .pill').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       state.amp.voice = btn.dataset.voice;
@@ -202,7 +215,7 @@ function initAmp() {
     });
   });
 
-  document.getElementById('amp-power-btn').addEventListener('click', function() {
+  onTap(document.getElementById('amp-power-btn'), function() {
     getAudio();
     if (!state.amp.on && !state.amp.stream) {
       connectDefaultInput();
@@ -219,13 +232,13 @@ function initAmp() {
     });
   });
 
-  document.getElementById('amp-cab-toggle').addEventListener('click', function(e) {
+  onTap(document.getElementById('amp-cab-toggle'), function(e) {
     state.amp.cabOn = !state.amp.cabOn;
     e.currentTarget.classList.toggle('on', state.amp.cabOn);
     updateAmpParams();
   });
 
-  document.getElementById('amp-gate-toggle').addEventListener('click', function(e) {
+  onTap(document.getElementById('amp-gate-toggle'), function(e) {
     state.amp.gateOn = !state.amp.gateOn;
     e.currentTarget.classList.toggle('on', state.amp.gateOn);
     updateAmpParams();
