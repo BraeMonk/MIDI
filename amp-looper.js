@@ -83,18 +83,8 @@ function buildAmpChain(ctx) {
 }
 
 async function refreshAmpInputDevices() {
+  ampLog('Scanning for devices…', 'msg');
   try {
-    if (!state._micPermAsked) {
-      try {
-        const s = await navigator.mediaDevices.getUserMedia({ audio: true });
-        s.getTracks().forEach(t => t.stop());
-        state._micPermAsked = true;
-      } catch (permErr) {
-        ampLog('Mic permission denied or blocked: ' + permErr.message, 'err');
-        ampLog('Check Settings → Safari → Microphone, or the site permission icon in the address bar.', 'msg');
-        return; // don't bother enumerating — labels will be blank anyway
-      }
-    }
     const devices = await navigator.mediaDevices.enumerateDevices();
     const inputs  = devices.filter(d => d.kind === 'audioinput');
     const sel = document.getElementById('amp-input-select');
@@ -102,7 +92,7 @@ async function refreshAmpInputDevices() {
     sel.innerHTML = '';
     if (inputs.length === 0) {
       sel.innerHTML = '<option value="">No audio inputs found</option>';
-      ampLog('No audio inputs detected by the browser.', 'err');
+      ampLog('No audio inputs detected. Try the ⚡ button instead.', 'err');
       return;
     }
     inputs.forEach((d, i) => {
@@ -111,9 +101,7 @@ async function refreshAmpInputDevices() {
       opt.textContent = d.label || `Input ${i + 1}`;
       sel.appendChild(opt);
     });
-    ampLog(`Found ${inputs.length} input device(s).`, 'ok');
-    const usbMatch = inputs.find(d => /usb|interface|audio/i.test(d.label));
-    if (usbMatch) sel.value = usbMatch.deviceId;
+    ampLog('Found ' + inputs.length + ' input(s). Select one or use ⚡.', 'ok');
   } catch (err) {
     ampLog('Could not list devices: ' + err.message, 'err');
   }
@@ -195,35 +183,48 @@ function ampLog(msg, type) {
 }
 
 async function connectDefaultInput() {
-  try {
+  ampLog('Requesting mic access…', 'msg');
+  // Single direct getUserMedia — no intermediate awaits before this point.
+  // iOS Safari requires the call to be synchronously reachable from the tap handler.
+  navigator.mediaDevices.getUserMedia({
+    audio: {
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+    }
+  }).then(function(stream) {
     const ctx = getAudio();
     if (state.amp.stream) state.amp.stream.getTracks().forEach(t => t.stop());
-
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false,
-        channelCount: { ideal: 1 },
-      }
-    });
-
     state.amp.stream = stream;
     state.amp.deviceId = null;
     if (state.amp.sourceNode) { try { state.amp.sourceNode.disconnect(); } catch(e){} }
     state.amp.sourceNode = ctx.createMediaStreamSource(stream);
     if (!state.amp.nodes) state.amp.nodes = buildAmpChain(ctx);
     state.amp.sourceNode.connect(state.amp.nodes.input);
-
     const track = stream.getAudioTracks()[0];
-    ampLog(`Connected: ${track ? track.label : 'default input'} ✓`, 'ok');
+    ampLog('Connected: ' + (track ? track.label : 'audio input') + ' ✓', 'ok');
     setAmpPower(true);
-  } catch (err) {
-    ampLog('Input error: ' + err.message, 'err');
-  }
+  }).catch(function(err) {
+    ampLog('Error: ' + err.name + ' — ' + err.message, 'err');
+  });
 }
 
 function initAmp() {
+  state.amp = {
+    on: false,
+    voice: 'clean',
+    drive: 35,
+    bass: 0,
+    mid: 0,
+    treble: 0,
+    volume: 80,
+    cabOn: true,
+    gateOn: true,
+    stream: null,
+    sourceNode: null,
+    nodes: null,
+    deviceId: null,
+  };
   ampLog('Tap Refresh to detect your USB interface, or use the iOS button below.', 'msg');
 
   document.getElementById('amp-input-refresh').addEventListener('click', refreshAmpInputDevices);
