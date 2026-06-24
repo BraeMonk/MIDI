@@ -473,5 +473,23 @@ function updateLooperRecTimer() {
 
 // app.js executes init() before this file loads, so window.initAmp/initLooper
 // are not set in time. Call them directly here instead.
-initAmp();
-initLooper();
+try {
+  initAmp();
+} catch(e) {
+  // Force the error into the amp-log even if ampLog itself isn't working
+  var _log = document.getElementById('amp-log');
+  if (_log) {
+    _log.innerHTML = '<span style="color:#F05C5C;font-weight:700;white-space:pre-wrap;">initAmp CRASHED:\n' + e.name + ': ' + e.message + '\nLine: ' + (e.stack || '').split('\n').slice(0,3).join('\n') + '</span>';
+  }
+}
+try {
+  initLooper();
+} catch(e) {
+  var _log2 = document.getElementById('amp-log');
+  if (_log2) {
+    var _s = document.createElement('span');
+    _s.style.cssText = 'color:#F05C5C;font-weight:700;white-space:pre-wrap;';
+    _s.textContent = 'initLooper CRASHED:\n' + e.name + ': ' + e.message;
+    _log2.appendChild(_s);
+  }
+}
