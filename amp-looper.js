@@ -24,21 +24,7 @@ const AMP_VOICES = {
   acoustic: { driveCurve: 'soft', driveMul: 0.08,bass: 1,  mid: 2,  treble: 4,  cabFreq: 5200, preGain: 0.75 },
 };
 
-state.amp = {
-  on: false,
-  voice: 'clean',
-  drive: 35,
-  bass: 0,
-  mid: 0,
-  treble: 0,
-  volume: 80,
-  cabOn: true,
-  gateOn: true,
-  stream: null,
-  sourceNode: null,
-  nodes: null,
-  deviceId: null,
-};
+// state.amp is initialized inside initAmp() below
 
 function makeDistortionCurve(amount, type) {
   const n = 4096;
