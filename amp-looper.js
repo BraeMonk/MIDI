@@ -208,13 +208,43 @@ function ampLog(msg, type) {
   log.scrollTop = log.scrollHeight;
 }
 
+async function connectDefaultInput() {
+  try {
+    const ctx = getAudio();
+    if (state.amp.stream) state.amp.stream.getTracks().forEach(t => t.stop());
+
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+        channelCount: { ideal: 1 },
+      }
+    });
+
+    state.amp.stream = stream;
+    state.amp.deviceId = null;
+    if (state.amp.sourceNode) { try { state.amp.sourceNode.disconnect(); } catch(e){} }
+    state.amp.sourceNode = ctx.createMediaStreamSource(stream);
+    if (!state.amp.nodes) state.amp.nodes = buildAmpChain(ctx);
+    state.amp.sourceNode.connect(state.amp.nodes.input);
+
+    const track = stream.getAudioTracks()[0];
+    ampLog(`Connected: ${track ? track.label : 'default input'} ✓`, 'ok');
+    setAmpPower(true);
+  } catch (err) {
+    ampLog('Input error: ' + err.message, 'err');
+  }
+}
+
 function initAmp() {
-  ampLog('Tap Refresh to detect your USB interface.', 'msg');
+  ampLog('Tap Refresh to detect your USB interface, or use the iOS button below.', 'msg');
 
   document.getElementById('amp-input-refresh').addEventListener('click', refreshAmpInputDevices);
   document.getElementById('amp-input-select').addEventListener('change', (e) => {
     connectAmpInput(e.target.value || undefined);
   });
+  document.getElementById('amp-connect-default').addEventListener('click', connectDefaultInput);
 
   document.querySelectorAll('#amp-voice-group .pill').forEach(btn => {
     btn.addEventListener('click', () => {
