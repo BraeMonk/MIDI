@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#15161A" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>RELAY — MIDI Controller</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --panel:    #15161A;
+      --raised:   #1D1F24;
+      --border:   #2A2C33;
+      --amber:    #E8A33D;
+      --amber-dim: rgba(232,163,61,0.12);
+      --amber-glow: rgba(232,163,61,0.35);
+      --teal:     #4FD1C5;
+      --teal-dim: rgba(79,209,197,0.12);
+      --text:     #E8E6E3;
+      --text-dim: #7A7D85;
+      --danger:   #E0524A;
+      --danger-dim: rgba(224,82,74,0.15);
+    }
+
+    html, body {
+      height: 100%;
+      width: 100%;
+      overflow: hidden;
+      background: var(--panel);
+      color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: none;
+      user-select: none;
+    }
+
+    /* ── LAYOUT ── */
+    #app {
+      display: flex;
+      flex-direction: column;
+      height: 100dvh;
+      width: 100%;
+    }
+
+    /* ── STATUS STRIP ── */
+    #status-strip {
+      flex-shrink: 0;
+      height: 48px;
+      background: var(--raised);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      gap: 20px;
+      position: relative;
+    }
+
+    .status-brand {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.2em;
+      color: var(--amber);
+      text-transform: uppercase;
+    }
+
+    .status-divider {
+      width: 1px;
+      height: 20px;
+      background: var(--border);
+    }
+
+    .relay-status {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      color: var(--text-dim);
+      text-transform: uppercase;
+    }
+
+    .led {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--text-dim);
+      transition: background 0.3s, box-shadow 0.3s;
+    }
+    .led.connected { background: var(--teal); box-shadow: 0 0 8px var(--teal); }
+    .led.warning   { background: var(--amber); box-shadow: 0 0 8px var(--amber); animation: pulse-led 1s ease-in-out infinite; }
+    .led.error     { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+
+    @keyframes pulse-led { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+    .status-right {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .readout {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+    }
+    .readout-label {
+      font-size: 8px;
+      letter-spacing: 0.15em;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      line-height: 1;
+    }
+    .readout-value {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--amber);
+      line-height: 1.2;
+    }
+
+    /* ── TAB STRIP ── */
+    #tab-strip {
+      flex-shrink: 0;
+      height: 40px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: flex-end;
+      padding: 0 12px;
+      gap: 4px;
+    }
+
+    .tab {
+      padding: 6px 16px;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      border: 1px solid transparent;
+      border-bottom: none;
+      border-radius: 4px 4px 0 0;
+      cursor: pointer;
+      background: transparent;
+      transition: color 0.15s, background 0.15s, border-color 0.15s;
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active {
+      color: var(--amber);
+      background: var(--raised);
+      border-color: var(--border);
+    }
+
+    /* ── MAIN CONTENT ── */
+    #main {
+      flex: 1;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .panel {
+      display: none;
+      height: 100%;
+      width: 100%;
+    }
+    .panel.active { display: flex; flex-direction: column; }
+
+    /* ── PIANO ROLL ── */
+    #piano-panel {
+      flex-direction: column;
+      justify-content: flex-end;
+    }
+
+    #octave-controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 16px;
+      background: var(--raised);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .control-label {
+      font-size: 9px;
+      letter-spacing: 0.15em;
+      color: var(--text-dim);
+      text-transform: uppercase;
+    }
+
+    .btn-sm {
+      width: 28px;
+      height: 28px;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      background: var(--panel);
+      color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: border-color 0.1s, background 0.1s;
+    }
+    .btn-sm:active { background: var(--amber-dim); border-color: var(--amber); }
+
+    #octave-display {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--amber);
+      min-width: 28px;
+      text-align: center;
+    }
+
+    .control-sep { flex: 1; }
+
+    #velocity-display {
+      font-size: 10px;
+      color: var(--text-dim);
+    }
+    #velocity-display span { color: var(--amber); font-weight: 600; }
+
+    #keyboard-container {
+      flex: 1;
+      overflow-x: auto;
+      overflow-y: hidden;
+      position: relative;
+    }
+
+    #keyboard {
+      height: 100%;
+      display: flex;
+      position: relative;
+      min-width: max-content;
+    }
+
+    .key {
+      position: relative;
+      border: none;
+      cursor: pointer;
+      touch-action: none;
+      transition: background 0.05s;
+    }
+
+    .key.white {
+      width: 48px;
+      height: 100%;
+      background: #D8D5CF;
+      border-right: 1px solid #9A9590;
+      border-bottom: 4px solid #9A9590;
+      border-radius: 0 0 4px 4px;
+      z-index: 1;
+    }
+    .key.white:first-child { border-left: 1px solid #9A9590; }
+    .key.white.active {
+      background: var(--amber);
+      box-shadow: 0 0 20px var(--amber-glow), inset 0 -4px 0 rgba(0,0,0,0.2);
+    }
+    .key.white .note-label {
+      position: absolute;
+      bottom: 8px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      color: #7A7D85;
+      pointer-events: none;
+    }
+    .key.white.active .note-label { color: #15161A; }
+
+    .key.black {
+      position: absolute;
+      width: 28px;
+      height: 62%;
+      background: #1A1B1F;
+      border: 1px solid #0A0B0D;
+      border-bottom: 4px solid #0A0B0D;
+      border-radius: 0 0 3px 3px;
+      z-index: 2;
+      top: 0;
+    }
+    .key.black.active {
+      background: var(--amber);
+      box-shadow: 0 0 14px var(--amber-glow);
+    }
+
+    /* ── DRUM GRID ── */
+    #drum-panel {
+      padding: 16px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      align-content: center;
+    }
+
+    .drum-pad {
+      aspect-ratio: 1;
+      background: var(--raised);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      cursor: pointer;
+      touch-action: none;
+      position: relative;
+      overflow: hidden;
+      transition: border-color 0.08s;
+    }
+    .drum-pad::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: var(--amber-dim);
+      opacity: 0;
+      transition: opacity 0.08s;
+    }
+    .drum-pad.active::before { opacity: 1; }
+    .drum-pad.active { border-color: var(--amber); box-shadow: 0 0 20px var(--amber-glow); }
+
+    .pad-num {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.15em;
+      color: var(--text-dim);
+      text-transform: uppercase;
+    }
+    .pad-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      text-align: center;
+      padding: 0 8px;
+    }
+    .pad-note {
+      font-size: 9px;
+      color: var(--text-dim);
+    }
+    .pad-vel-bar {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      height: 3px;
+      background: var(--amber);
+      width: 0%;
+      transition: width 0.1s;
+    }
+
+    /* ── SAMPLES PANEL ── */
+    #samples-panel {
+      padding: 16px;
+      gap: 12px;
+      overflow-y: auto;
+    }
+
+    .samples-section-title {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.2em;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .record-controls {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .btn-record {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 20px;
+      background: var(--danger-dim);
+      border: 1px solid var(--danger);
+      border-radius: 4px;
+      color: var(--danger);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: background 0.15s, box-shadow 0.15s;
+    }
+    .btn-record:hover { background: rgba(224,82,74,0.2); }
+    .btn-record.recording {
+      background: var(--danger);
+      color: #fff;
+      box-shadow: 0 0 20px rgba(224,82,74,0.4);
+      animation: pulse-record 1s ease-in-out infinite;
+    }
+    @keyframes pulse-record { 0%,100%{opacity:1} 50%{opacity:0.7} }
+
+    .rec-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .rec-timer {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--danger);
+      min-width: 60px;
+    }
+
+    .sample-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .sample-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      background: var(--raised);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+    .sample-item-name {
+      flex: 1;
+      font-size: 12px;
+      color: var(--text);
+    }
+    .sample-item-dur {
+      font-size: 10px;
+      color: var(--text-dim);
+    }
+    .btn-icon {
+      width: 30px;
+      height: 30px;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      background: var(--panel);
+      color: var(--text-dim);
+      font-size: 13px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: color 0.1s, border-color 0.1s;
+    }
+    .btn-icon:hover { color: var(--amber); border-color: var(--amber); }
+    .btn-icon.danger:hover { color: var(--danger); border-color: var(--danger); }
+
+    /* ── SETTINGS PANEL ── */
+    #settings-panel {
+      padding: 16px;
+      gap: 16px;
+      overflow-y: auto;
+    }
+
+    .settings-group {
+      background: var(--raised);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .setting-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .setting-label {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .setting-name {
+      font-size: 12px;
+      color: var(--text);
+    }
+    .setting-desc {
+      font-size: 10px;
+      color: var(--text-dim);
+      font-family: 'Inter', sans-serif;
+    }
+
+    input[type="text"], input[type="number"] {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      padding: 6px 10px;
+      width: 160px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    input:focus { border-color: var(--amber); }
+
+    .btn-primary {
+      padding: 8px 16px;
+      background: var(--amber-dim);
+      border: 1px solid var(--amber);
+      border-radius: 4px;
+      color: var(--amber);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn-primary:hover { background: rgba(232,163,61,0.2); }
+    .btn-primary:active { background: rgba(232,163,61,0.3); }
+
+    /* ── WS LOG ── */
+    .ws-log {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      color: var(--text-dim);
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 8px 10px;
+      height: 80px;
+      overflow-y: auto;
+      line-height: 1.6;
+    }
+    .ws-log .log-ok  { color: var(--teal); }
+    .ws-log .log-err { color: var(--danger); }
+    .ws-log .log-msg { color: var(--text-dim); }
+
+    /* ── SCROLLBAR ── */
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-track { background: var(--panel); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    /* ── EMPTY SAMPLE ── */
+    .empty-state {
+      padding: 32px;
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 11px;
+      font-family: 'Inter', sans-serif;
+      line-height: 1.6;
+    }
+
+    /* ── VELOCITY GLOW ON KEYS ── */
+    .key.white.active { --vel: 1; }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <!-- STATUS STRIP -->
+  <div id="status-strip">
+    <span class="status-brand">Relay</span>
+    <div class="status-divider"></div>
+    <div class="relay-status">
+      <div class="led" id="relay-led"></div>
+      <span id="relay-label">OFFLINE</span>
+    </div>
+    <div class="status-right">
+      <div class="readout">
+        <span class="readout-label">Channel</span>
+        <span class="readout-value" id="ch-display">01</span>
+      </div>
+      <div class="readout">
+        <span class="readout-label">Oct</span>
+        <span class="readout-value" id="oct-display-strip">4</span>
+      </div>
+      <div class="readout">
+        <span class="readout-label">Vel</span>
+        <span class="readout-value" id="vel-display-strip">—</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB STRIP -->
+  <div id="tab-strip">
+    <button class="tab active" data-tab="piano">⊞ Keys</button>
+    <button class="tab" data-tab="drum">▦ Pads</button>
+    <button class="tab" data-tab="samples">● Samples</button>
+    <button class="tab" data-tab="settings">⚙ Config</button>
+  </div>
+
+  <!-- MAIN -->
+  <div id="main">
+
+    <!-- PIANO PANEL -->
+    <div class="panel active" id="piano-panel">
+      <div id="octave-controls">
+        <span class="control-label">Octave</span>
+        <button class="btn-sm" id="oct-down">−</button>
+        <span id="octave-display">4</span>
+        <button class="btn-sm" id="oct-up">+</button>
+        <div class="control-sep"></div>
+        <div id="velocity-display">Vel <span id="vel-readout">—</span></div>
+      </div>
+      <div id="keyboard-container">
+        <div id="keyboard"></div>
+      </div>
+    </div>
+
+    <!-- DRUM PANEL -->
+    <div class="panel" id="drum-panel"></div>
+
+    <!-- SAMPLES PANEL -->
+    <div class="panel" id="samples-panel">
+      <div class="samples-section-title">Sample Recorder</div>
+      <div class="record-controls">
+        <button class="btn-record" id="record-btn">
+          <span class="rec-dot"></span>Record
+        </button>
+        <span class="rec-timer" id="rec-timer">0:00</span>
+      </div>
+      <div class="samples-section-title">Library</div>
+      <div class="sample-list" id="sample-list">
+        <div class="empty-state">No samples yet.<br>Record audio above, then assign pads in Config.</div>
+      </div>
+    </div>
+
+    <!-- SETTINGS PANEL -->
+    <div class="panel" id="settings-panel">
+      <div class="samples-section-title">Relay Connection</div>
+      <div class="settings-group">
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">WebSocket URL</span>
+            <span class="setting-desc">ws://&lt;pi-ip&gt;:8080 — set once Pi relay is running</span>
+          </div>
+        </div>
+        <div class="setting-row">
+          <input type="text" id="ws-url-input" placeholder="ws://192.168.1.x:8080" />
+          <button class="btn-primary" id="ws-connect-btn">Connect</button>
+        </div>
+        <div class="ws-log" id="ws-log"><span class="log-msg">Relay not configured.</span></div>
+      </div>
+
+      <div class="samples-section-title">MIDI</div>
+      <div class="settings-group">
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">MIDI Channel</span>
+            <span class="setting-desc">1–16</span>
+          </div>
+          <input type="number" id="channel-input" min="1" max="16" value="1" style="width:80px" />
+        </div>
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">Velocity Curve</span>
+            <span class="setting-desc">How Y-position maps to velocity</span>
+          </div>
+          <select id="vel-curve" style="background:var(--panel);border:1px solid var(--border);border-radius:3px;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:12px;padding:6px 10px;outline:none;">
+            <option value="linear">Linear</option>
+            <option value="exp">Exponential</option>
+            <option value="log">Logarithmic</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="samples-section-title">About</div>
+      <div class="settings-group">
+        <div class="setting-row">
+          <div class="setting-label">
+            <span class="setting-name">RELAY v0.1.0</span>
+            <span class="setting-desc" style="font-family:'Inter',sans-serif">PWA MIDI Controller — Works offline. Pi relay + DAW bridge coming next.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
