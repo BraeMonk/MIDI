@@ -7,7 +7,16 @@
 // ── AUDIO CONTEXT ──────────────────────────────
 let audioCtx = null;
 function getAudio() {
-  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    // Master bus — every live sound source (synths, drums, amp) routes here.
+    // The looper taps this bus to record performances in layers.
+    state.masterGain = audioCtx.createGain();
+    state.masterGain.gain.value = 1;
+    state.masterGain.connect(audioCtx.destination);
+    state.loopTapNode = audioCtx.createMediaStreamDestination();
+    state.masterGain.connect(state.loopTapNode);
+  }
   if (audioCtx.state === 'suspended') audioCtx.resume();
   return audioCtx;
 }
@@ -188,7 +197,7 @@ function buildSynthVoice(ctx, freq, vel01, type) {
   osc.connect(filter);
   osc2.connect(filter);
   filter.connect(gain);
-  gain.connect(ctx.destination);
+  gain.connect(state.masterGain);
 
   osc.start();
   osc2.start();
@@ -263,7 +272,7 @@ function triggerDrum(def, velocity, el) {
     osc.frequency.exponentialRampToValueAtTime(40, ctx.currentTime + 0.12);
     gain.gain.setValueAtTime(vel01, ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
-    osc.connect(gain); gain.connect(ctx.destination);
+    osc.connect(gain); gain.connect(state.masterGain);
     osc.start(); osc.stop(ctx.currentTime + 0.4);
   } else if (def.note === 38 || def.note === 40) {
     // Snare
@@ -277,7 +286,7 @@ function triggerDrum(def, velocity, el) {
     filt.type = 'bandpass'; filt.frequency.value = 3000; filt.Q.value = 0.7;
     gain.gain.setValueAtTime(vel01 * 0.7, ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18);
-    src.connect(filt); filt.connect(gain); gain.connect(ctx.destination);
+    src.connect(filt); filt.connect(gain); gain.connect(state.masterGain);
     src.start();
   } else if ([42, 44, 46].includes(def.note)) {
     // Hi-hat
@@ -292,7 +301,7 @@ function triggerDrum(def, velocity, el) {
     const dur = def.note === 46 ? 0.25 : 0.05;
     gain.gain.setValueAtTime(vel01 * 0.5, ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
-    src.connect(filt); filt.connect(gain); gain.connect(ctx.destination);
+    src.connect(filt); filt.connect(gain); gain.connect(state.masterGain);
     src.start();
   } else if (def.note === 37) {
     // Rim / sidestick
@@ -306,7 +315,7 @@ function triggerDrum(def, velocity, el) {
     filt.type = 'bandpass'; filt.frequency.value = 1800; filt.Q.value = 2;
     gain.gain.setValueAtTime(vel01 * 0.6, ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.07);
-    src.connect(filt); filt.connect(gain); gain.connect(ctx.destination);
+    src.connect(filt); filt.connect(gain); gain.connect(state.masterGain);
     src.start();
   } else if (def.note === 55) {
     // Cowbell
@@ -316,7 +325,7 @@ function triggerDrum(def, velocity, el) {
     osc.frequency.value = 562;
     gain.gain.setValueAtTime(vel01 * 0.4, ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
-    osc.connect(gain); gain.connect(ctx.destination);
+    osc.connect(gain); gain.connect(state.masterGain);
     osc.start(); osc.stop(ctx.currentTime + 0.45);
   } else {
     // Toms / ride / crash — pitched sine
@@ -328,7 +337,7 @@ function triggerDrum(def, velocity, el) {
     osc.frequency.exponentialRampToValueAtTime(40, ctx.currentTime + 0.25);
     gain.gain.setValueAtTime(vel01 * 0.5, ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
-    osc.connect(gain); gain.connect(ctx.destination);
+    osc.connect(gain); gain.connect(state.masterGain);
     osc.start(); osc.stop(ctx.currentTime + 0.35);
   }
 
@@ -927,6 +936,8 @@ function init() {
   buildPadAssignmentList();
   openDB();
   updateOctaveDisplay();
+  if (window.initAmp)    window.initAmp();
+  if (window.initLooper) window.initLooper();
 
   document.addEventListener('touchstart', () => getAudio(), { once: true });
   document.addEventListener('mousedown',  () => getAudio(), { once: true });
