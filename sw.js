@@ -8,6 +8,7 @@ const PRECACHE = [
   './',
   './index.html',
   './app.js',
+  './amp-looper.js',
   './manifest.json',
   'https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500&display=swap'
 ];
