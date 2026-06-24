@@ -832,6 +832,18 @@
     ::-webkit-scrollbar { width: 3px; height: 3px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    #amp-panel .panel-scroll {
+      flex: 1;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      touch-action: pan-y;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      min-height: 0;
+    }
+
     /* ─── AMP SLIDERS ────────────────────────────── */
     .amp-slider {
       flex: 1;
@@ -842,6 +854,7 @@
       background: var(--border-hi);
       border-radius: 2px;
       outline: none;
+      touch-action: pan-x;
     }
     .amp-slider::-webkit-slider-thumb {
       -webkit-appearance: none;
