@@ -262,6 +262,13 @@ function initLooper() {
   document.getElementById('looper-play-all').addEventListener('click', playAllLayers);
   document.getElementById('looper-stop-all').addEventListener('click', stopAllLayers);
   document.getElementById('looper-clear-all').addEventListener('click', clearAllLayers);
+
+  // Floating record button — works from any tab
+  var floatBtn = document.getElementById('float-rec-btn');
+  if (floatBtn) {
+    floatBtn.addEventListener('touchend', function(e) { e.preventDefault(); toggleLooperRecord(); });
+    floatBtn.addEventListener('click', toggleLooperRecord);
+  }
 }
 window.initLooper = initLooper;
 
@@ -451,14 +458,28 @@ function updateLooperLengthDisplay() {
 
 function updateLooperRecUI(mode) {
   const btn = document.getElementById('looper-record-btn');
-  if (!btn) return;
-  btn.classList.toggle('recording', mode === true);
-  if (mode === true) btn.innerHTML = '<span class="rec-dot"></span>Stop';
-  else if (mode === 'armed') btn.innerHTML = '<span class="rec-dot"></span>Armed… (tap to cancel)';
-  else {
-    btn.innerHTML = '<span class="rec-dot"></span>Record Layer';
-    const t = document.getElementById('looper-rec-timer');
-    if (t) t.textContent = '0:00';
+  const floatBtn = document.getElementById('float-rec-btn');
+  const floatLabel = floatBtn ? floatBtn.querySelector('.float-label') : null;
+
+  if (btn) {
+    btn.classList.toggle('recording', mode === true);
+    if (mode === true) btn.innerHTML = '<span class="rec-dot"></span>Stop';
+    else if (mode === 'armed') btn.innerHTML = '<span class="rec-dot"></span>Armed… (tap to cancel)';
+    else {
+      btn.innerHTML = '<span class="rec-dot"></span>Record Layer';
+      const t = document.getElementById('looper-rec-timer');
+      if (t) t.textContent = '0:00';
+    }
+  }
+
+  if (floatBtn) {
+    floatBtn.classList.toggle('recording', mode === true);
+    floatBtn.classList.toggle('armed', mode === 'armed');
+    if (floatLabel) {
+      if (mode === true)       floatLabel.textContent = 'STOP';
+      else if (mode === 'armed') floatLabel.textContent = 'WAIT';
+      else                     floatLabel.textContent = 'REC';
+    }
   }
 }
 
