@@ -102,8 +102,12 @@ async function refreshAmpInputDevices() {
       try {
         const s = await navigator.mediaDevices.getUserMedia({ audio: true });
         s.getTracks().forEach(t => t.stop());
-      } catch (e) { /* user may decline; selector will still show generic labels */ }
-      state._micPermAsked = true;
+        state._micPermAsked = true;
+      } catch (permErr) {
+        ampLog('Mic permission denied or blocked: ' + permErr.message, 'err');
+        ampLog('Check Settings → Safari → Microphone, or the site permission icon in the address bar.', 'msg');
+        return; // don't bother enumerating — labels will be blank anyway
+      }
     }
     const devices = await navigator.mediaDevices.enumerateDevices();
     const inputs  = devices.filter(d => d.kind === 'audioinput');
@@ -112,6 +116,7 @@ async function refreshAmpInputDevices() {
     sel.innerHTML = '';
     if (inputs.length === 0) {
       sel.innerHTML = '<option value="">No audio inputs found</option>';
+      ampLog('No audio inputs detected by the browser.', 'err');
       return;
     }
     inputs.forEach((d, i) => {
@@ -120,6 +125,7 @@ async function refreshAmpInputDevices() {
       opt.textContent = d.label || `Input ${i + 1}`;
       sel.appendChild(opt);
     });
+    ampLog(`Found ${inputs.length} input device(s).`, 'ok');
     const usbMatch = inputs.find(d => /usb|interface|audio/i.test(d.label));
     if (usbMatch) sel.value = usbMatch.deviceId;
   } catch (err) {
@@ -203,7 +209,7 @@ function ampLog(msg, type) {
 }
 
 function initAmp() {
-  refreshAmpInputDevices();
+  ampLog('Tap Refresh to detect your USB interface.', 'msg');
 
   document.getElementById('amp-input-refresh').addEventListener('click', refreshAmpInputDevices);
   document.getElementById('amp-input-select').addEventListener('change', (e) => {
