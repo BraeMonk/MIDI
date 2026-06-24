@@ -832,6 +832,63 @@
     ::-webkit-scrollbar { width: 3px; height: 3px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    /* ─── AMP SLIDERS ────────────────────────────── */
+    .amp-slider {
+      flex: 1;
+      max-width: 160px;
+      height: 4px;
+      -webkit-appearance: none;
+      appearance: none;
+      background: var(--border-hi);
+      border-radius: 2px;
+      outline: none;
+    }
+    .amp-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px; height: 16px;
+      border-radius: 50%;
+      background: var(--amber);
+      box-shadow: 0 0 6px var(--amber-glow);
+      cursor: pointer;
+    }
+    .amp-slider::-moz-range-thumb {
+      width: 16px; height: 16px;
+      border: none;
+      border-radius: 50%;
+      background: var(--amber);
+      cursor: pointer;
+    }
+
+    /* ─── LOOPER LAYER ROWS ──────────────────────── */
+    .layer-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      background: var(--raised);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+    .layer-info { display: flex; flex-direction: column; min-width: 56px; flex-shrink: 0; }
+    .layer-name { font-size: 11px; font-weight: 700; color: var(--text); }
+    .layer-meta { font-size: 8px; color: var(--text-dim); letter-spacing: 0.06em; }
+    .layer-vol { flex: 1; }
+    .layer-mute {
+      flex-shrink: 0;
+      padding: 4px 9px;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      background: transparent;
+      color: var(--text-dim);
+      cursor: pointer;
+    }
+    .layer-mute.active { color: var(--amber); border-color: var(--amber); background: var(--amber-dim); }
+    .layer-item.recording { border-color: var(--danger); box-shadow: 0 0 8px var(--danger-dim); }
+    .layer-item.rec-armed { border-color: var(--amber); }
+
   </style>
 </head>
 <body>
@@ -867,6 +924,8 @@
     <button class="tab active" data-tab="piano">⊞ Keys</button>
     <button class="tab" data-tab="drum">▦ Pads</button>
     <button class="tab" data-tab="samples">◉ Samples</button>
+    <button class="tab" data-tab="amp">▲ Amp</button>
+    <button class="tab" data-tab="looper">⟲ Looper</button>
     <button class="tab" data-tab="config">⚙ Config</button>
   </div>
 
@@ -960,6 +1019,123 @@
           <div class="section-head">Library</div>
           <div class="sample-list" id="sample-list">
             <div class="empty-state">No samples yet.<br>Hit Record above, then assign to a pad.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── AMP PANEL ────────────────────────── -->
+    <div class="panel" id="amp-panel">
+      <div class="toolbar">
+        <span class="toolbar-label">Voice</span>
+        <div class="pill-group" id="amp-voice-group">
+          <button class="pill active" data-voice="clean">Clean</button>
+          <button class="pill" data-voice="crunch">Crunch</button>
+          <button class="pill" data-voice="lead">Lead</button>
+          <button class="pill" data-voice="metal">Metal</button>
+          <button class="pill" data-voice="bass">Bass</button>
+          <button class="pill" data-voice="acoustic">Acoustic</button>
+        </div>
+        <div class="toolbar-spacer"></div>
+        <button class="pill teal" id="amp-power-btn" data-on="off">⏻ Off</button>
+      </div>
+      <div class="panel-scroll">
+
+        <div class="config-group">
+          <div class="config-group-title">Guitar Input (USB / OTG)</div>
+          <div class="config-row">
+            <div class="config-row-label">
+              <span class="config-row-name">Input Device</span>
+              <span class="config-row-desc">Pick your USB audio interface</span>
+            </div>
+          </div>
+          <div class="config-row">
+            <select class="config-select" id="amp-input-select" style="flex:1;"></select>
+            <button class="btn-primary" id="amp-input-refresh">Refresh</button>
+          </div>
+          <div class="ws-log" id="amp-log"><span class="log-msg">No input connected.</span></div>
+        </div>
+
+        <div class="config-group">
+          <div class="config-group-title">Tone Stack</div>
+          <div class="config-row">
+            <div class="config-row-label">
+              <span class="config-row-name">Drive</span>
+              <span class="config-row-desc">Preamp gain / distortion amount</span>
+            </div>
+            <input type="range" class="amp-slider" id="amp-drive" min="0" max="100" value="35" />
+          </div>
+          <div class="config-row">
+            <div class="config-row-label">
+              <span class="config-row-name">Bass</span>
+            </div>
+            <input type="range" class="amp-slider" id="amp-bass" min="-12" max="12" value="0" />
+          </div>
+          <div class="config-row">
+            <div class="config-row-label">
+              <span class="config-row-name">Mid</span>
+            </div>
+            <input type="range" class="amp-slider" id="amp-mid" min="-12" max="12" value="0" />
+          </div>
+          <div class="config-row">
+            <div class="config-row-label">
+              <span class="config-row-name">Treble</span>
+            </div>
+            <input type="range" class="amp-slider" id="amp-treble" min="-12" max="12" value="0" />
+          </div>
+          <div class="config-row">
+            <div class="config-row-label">
+              <span class="config-row-name">Cabinet Sim</span>
+              <span class="config-row-desc">Speaker cab + mic emulation</span>
+            </div>
+            <div class="toggle on" id="amp-cab-toggle"></div>
+          </div>
+          <div class="config-row">
+            <div class="config-row-label">
+              <span class="config-row-name">Master Volume</span>
+            </div>
+            <input type="range" class="amp-slider" id="amp-volume" min="0" max="100" value="80" />
+          </div>
+          <div class="config-row">
+            <div class="config-row-label">
+              <span class="config-row-name">Noise Gate</span>
+              <span class="config-row-desc">Cuts hiss between notes</span>
+            </div>
+            <div class="toggle on" id="amp-gate-toggle"></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ── LOOPER PANEL ─────────────────────── -->
+    <div class="panel" id="looper-panel">
+      <div class="toolbar">
+        <span class="toolbar-label">Loop</span>
+        <span id="looper-length-display" style="font-size:11px;color:var(--text-mid);">No loop set</span>
+        <div class="toolbar-spacer"></div>
+        <button class="icon-btn" id="looper-play-all">▶ Play</button>
+        <button class="icon-btn" id="looper-stop-all">■ Stop</button>
+        <button class="icon-btn" id="looper-clear-all">Clear</button>
+      </div>
+      <div class="panel-scroll">
+        <div>
+          <div class="section-head">Record Layer</div>
+          <div class="record-row" style="margin-top:10px;">
+            <button class="btn-record" id="looper-record-btn">
+              <span class="rec-dot"></span>Record Layer
+            </button>
+            <span class="rec-timer" id="looper-rec-timer">0:00</span>
+          </div>
+          <div style="padding:6px 14px 0;font-size:9px;color:var(--text-dim);line-height:1.5;">
+            First layer: play freely, tap Stop to set the loop length.<br>
+            Every layer after that records exactly one loop, then joins playback.
+          </div>
+        </div>
+        <div>
+          <div class="section-head">Layers</div>
+          <div class="sample-list" id="looper-layer-list">
+            <div class="empty-state">No layers yet.<br>Play a sound (keys, pads, or the amp) and hit Record Layer.</div>
           </div>
         </div>
       </div>
@@ -1061,5 +1237,6 @@
 </div>
 
 <script src="app.js"></script>
+<script src="amp-looper.js"></script>
 </body>
 </html>
