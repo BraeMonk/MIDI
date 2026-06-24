@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#0E0F12" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta http-equiv="Permissions-Policy" content="microphone=*" />
   <title>RELAY — MIDI Controller</title>
   <link rel="manifest" href="manifest.json" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -804,14 +805,18 @@
       border: 1px solid var(--border);
       border-radius: 3px;
       padding: 8px 10px;
-      height: 70px;
+      height: 120px;
       overflow-y: auto;
       line-height: 1.7;
       margin: 0 14px 14px;
     }
-    .ws-log .log-ok  { color: var(--teal); }
-    .ws-log .log-err { color: var(--danger); }
-    .ws-log .log-msg { color: var(--text-dim); }
+    #amp-log .log-err {
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--danger);
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
 
     /* version badge */
     .version-badge {
