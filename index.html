@@ -6,7 +6,6 @@
   <meta name="theme-color" content="#0E0F12" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta http-equiv="Permissions-Policy" content="microphone=*" />
   <title>RELAY — MIDI Controller</title>
   <link rel="manifest" href="manifest.json" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -43,6 +42,7 @@
       color: var(--text);
       font-family: 'JetBrains Mono', monospace;
       -webkit-tap-highlight-color: transparent;
+      touch-action: none;
       user-select: none;
     }
 
@@ -598,6 +598,56 @@
       line-height: 1.7;
     }
 
+    /* ─── FLOATING LOOPER BUTTON ─────────────────── */
+    #float-rec-btn {
+      position: fixed;
+      bottom: 28px;
+      right: 18px;
+      z-index: 900;
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      border: 2px solid var(--danger);
+      background: var(--danger-dim);
+      color: var(--danger);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 3px;
+      cursor: pointer;
+      touch-action: manipulation;
+      transition: background 0.12s, box-shadow 0.12s, border-color 0.12s;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.4);
+    }
+    #float-rec-btn .float-dot {
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: currentColor;
+      flex-shrink: 0;
+      transition: transform 0.12s;
+    }
+    #float-rec-btn .float-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 7px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      line-height: 1;
+    }
+    #float-rec-btn.recording {
+      background: var(--danger);
+      color: #fff;
+      box-shadow: 0 0 20px rgba(240,92,92,0.5);
+      animation: rec-pulse 1s ease-in-out infinite;
+    }
+    #float-rec-btn.armed {
+      border-color: var(--amber);
+      color: var(--amber);
+      background: var(--amber-dim);
+      animation: rec-pulse 0.5s ease-in-out infinite;
+    }
+
     /* assign modal */
     #assign-modal {
       display: none;
@@ -829,25 +879,6 @@
     }
 
     /* ─── SCROLLBAR ──────────────────────────────── */
-    #amp-panel .panel-scroll {
-      flex: 1;
-      overflow-y: auto;
-      -webkit-overflow-scrolling: touch;
-      padding: 14px;
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-      min-height: 0;
-    }
-    #amp-log {
-      height: 120px !important;
-    }
-    #amp-log .log-err {
-      color: var(--danger);
-      font-weight: 700;
-      white-space: pre-wrap;
-      word-break: break-all;
-    }
     ::-webkit-scrollbar { width: 3px; height: 3px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
@@ -1258,6 +1289,12 @@
   </div>
 </div>
 
+<!-- FLOATING LOOPER RECORD BUTTON -->
+<div id="float-rec-btn" title="Record looper layer">
+  <span class="float-dot"></span>
+  <span class="float-label">REC</span>
+</div>
+
 <!-- ASSIGN MODAL -->
 <div id="assign-modal">
   <div class="modal-box">
@@ -1271,31 +1308,7 @@
   </div>
 </div>
 
-<script>
-  window.onerror = function(msg, src, line, col, err) {
-    var d = document.getElementById('amp-log');
-    if (d) {
-      var s = document.createElement('span');
-      s.className = 'log-err';
-      s.textContent = 'JS ERROR: ' + msg + ' (' + src.split('/').pop() + ':' + line + ')\n';
-      d.appendChild(s);
-      d.scrollTop = d.scrollHeight;
-    }
-    return false;
-  };
-</script>
 <script src="app.js"></script>
 <script src="amp-looper.js"></script>
-<script>
-  if (!window.initAmp) {
-    var d = document.getElementById('amp-log');
-    if (d) {
-      var s = document.createElement('span');
-      s.className = 'log-err';
-      s.textContent = 'FATAL: amp-looper.js did not load or crashed on parse. Check filename/path.\n';
-      d.appendChild(s);
-    }
-  }
-</script>
 </body>
 </html>
