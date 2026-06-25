@@ -84,7 +84,9 @@ function connectDefaultInput() {
     if (state.amp.sourceNode) { try { state.amp.sourceNode.disconnect(); } catch(e){} }
     state.amp.sourceNode = ctx.createMediaStreamSource(stream);
     if (!state.amp.nodes) state.amp.nodes = buildAmpChain(ctx);
-    state.amp.sourceNode.connect(state.amp.nodes.input);
+    // Route through FX chain if available, else connect directly
+    if (typeof patchAmpSourceIntoFX === 'function') patchAmpSourceIntoFX();
+    else state.amp.sourceNode.connect(state.amp.nodes.input);
     const track = stream.getAudioTracks()[0];
     ampLog('Connected: ' + (track ? track.label : 'audio input') + ' ✓', 'ok');
     setAmpPower(true);
@@ -142,7 +144,9 @@ async function connectAmpInput(deviceId) {
     if (state.amp.sourceNode) { try { state.amp.sourceNode.disconnect(); } catch(e){} }
     state.amp.sourceNode = ctx.createMediaStreamSource(stream);
     if (!state.amp.nodes) state.amp.nodes = buildAmpChain(ctx);
-    state.amp.sourceNode.connect(state.amp.nodes.input);
+    // Route through FX chain if available, else connect directly
+    if (typeof patchAmpSourceIntoFX === 'function') patchAmpSourceIntoFX();
+    else state.amp.sourceNode.connect(state.amp.nodes.input);
     const track = stream.getAudioTracks()[0];
     ampLog('Connected: ' + (track ? track.label : 'audio input') + ' ✓', 'ok');
     setAmpPower(true);
