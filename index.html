@@ -1016,7 +1016,187 @@
     .layer-item.recording { border-color: var(--danger); box-shadow: 0 0 8px var(--danger-dim); }
     .layer-item.rec-armed { border-color: var(--amber); }
 
-  </style>
+    /* ─── FX PANEL ───────────────────────────────── */
+    #fx-panel .panel-scroll {
+      flex: 1;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      touch-action: pan-y;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-height: 0;
+    }
+
+    .pedal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      transition: border-color 0.15s;
+    }
+    .pedal.active {
+      border-color: var(--amber);
+    }
+
+    .pedal-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      cursor: pointer;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .pedal-header:active { background: var(--raised); }
+
+    .pedal-bypass {
+      flex-shrink: 0;
+      width: 18px; height: 18px;
+      border-radius: 50%;
+      border: 1.5px solid var(--border-hi);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: border-color 0.15s;
+    }
+    .pedal.active .pedal-bypass {
+      border-color: var(--amber);
+    }
+    .pedal-bypass-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--border-hi);
+      transition: background 0.15s, box-shadow 0.15s;
+    }
+    .pedal.active .pedal-bypass-dot {
+      background: var(--amber);
+      box-shadow: 0 0 5px var(--amber-glow);
+    }
+
+    .pedal-name {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text);
+      flex-shrink: 0;
+    }
+    .pedal.active .pedal-name { color: var(--amber); }
+
+    .pedal-desc {
+      font-size: 8px;
+      color: var(--text-dim);
+      letter-spacing: 0.06em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .pedal-controls {
+      display: none;
+      flex-direction: column;
+      gap: 0;
+      border-top: 1px solid var(--border);
+      padding: 6px 0;
+    }
+    .pedal.open .pedal-controls { display: flex; }
+
+    .pedal-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 12px;
+    }
+    .pedal-row-label {
+      font-size: 8px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-mid);
+      width: 62px;
+      flex-shrink: 0;
+    }
+    .pedal-row-value {
+      font-size: 9px;
+      font-weight: 700;
+      color: var(--amber);
+      width: 58px;
+      text-align: right;
+      flex-shrink: 0;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .fx-slider {
+      flex: 1;
+      height: 4px;
+      -webkit-appearance: none;
+      appearance: none;
+      background: var(--border-hi);
+      border-radius: 2px;
+      outline: none;
+      touch-action: pan-x;
+    }
+    .fx-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: var(--amber);
+      box-shadow: 0 0 5px var(--amber-glow);
+      cursor: pointer;
+    }
+    .fx-slider::-moz-range-thumb {
+      width: 14px; height: 14px;
+      border: none;
+      border-radius: 50%;
+      background: var(--amber);
+      cursor: pointer;
+    }
+
+    /* Tuner */
+    .tuner-display {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 14px 14px;
+      border-top: 1px solid var(--border);
+    }
+    .pedal.open .tuner-display { display: flex; }
+
+    .tuner-note {
+      font-size: 32px;
+      font-weight: 700;
+      color: var(--amber);
+      line-height: 1;
+      letter-spacing: 0.05em;
+    }
+    .tuner-cents {
+      font-size: 10px;
+      color: var(--text-mid);
+      letter-spacing: 0.1em;
+    }
+    .tuner-bar-wrap {
+      width: 100%;
+      height: 4px;
+      background: var(--border-hi);
+      border-radius: 2px;
+      position: relative;
+    }
+    .tuner-bar {
+      position: absolute;
+      width: 6px; height: 10px;
+      top: -3px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--text-dim);
+      border-radius: 2px;
+      transition: left 0.1s, background 0.1s;
+    }
+    .tuner-bar.in-tune { background: var(--teal); box-shadow: 0 0 6px var(--teal); }
+
+  
 </head>
 <body>
 <div id="app">
@@ -1053,6 +1233,7 @@
     <button class="tab" data-tab="samples">◉ Samples</button>
     <button class="tab" data-tab="amp">▲ Amp</button>
     <button class="tab" data-tab="looper">⟲ Looper</button>
+    <button class="tab" data-tab="fx">⬡ FX</button>
     <button class="tab" data-tab="config">⚙ Config</button>
   </div>
 
@@ -1272,6 +1453,18 @@
       </div>
     </div>
 
+    <!-- ── FX PANEL ───────────────────────── -->
+    <div class="panel" id="fx-panel">
+      <div class="toolbar">
+        <span class="toolbar-label">FX Chain</span>
+        <div class="toolbar-spacer"></div>
+        <button class="pill teal" id="fx-bypass-all">Bypass All</button>
+      </div>
+      <div class="panel-scroll">
+        <div id="fx-pedal-list"></div>
+      </div>
+    </div>
+
     <!-- ── CONFIG PANEL ────────────────────── -->
     <div class="panel" id="config-panel">
       <div class="panel-scroll">
@@ -1375,5 +1568,6 @@
 
 <script src="app.js"></script>
 <script src="amp-looper.js"></script>
+<script src="fx.js"></script>
 </body>
 </html>
