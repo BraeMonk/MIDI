@@ -817,9 +817,17 @@ function finalizePadLoop(loop) {
     // Use the tap-tempo BPM (or prior master grid) when there isn't enough
     // rhythmic info from the taps themselves — e.g. a single kick hit —
     // instead of guessing a beat length from raw recording duration.
-    const beatLen  = deriveBeatLen(loop.taps, lastTapTime);
-    const numBeats = Math.max(1, Math.round((lastTapTime + beatLen * 0.5) / beatLen) || 1);
-    loop.loopLen   = numBeats * beatLen;
+    const beatLen = deriveBeatLen(loop.taps, lastTapTime);
+    // With fewer than 2 taps there's no rhythmic info to infer a phrase
+    // length from — default to a full 4-beat bar. Otherwise a 1-tap
+    // "timing reference" hit collapses the master loop to a single beat,
+    // and every other pad's hits get folded (% loopLen) into that tiny
+    // window, aliasing everything toward beat 1 regardless of where it
+    // was actually played.
+    const numBeats = loop.taps.length < 2
+      ? 4
+      : Math.max(1, Math.round((lastTapTime + beatLen * 0.5) / beatLen) || 1);
+    loop.loopLen  = numBeats * beatLen;
 
     quantizeTaps(loop.taps, beatLen, loop.loopLen);
 
