@@ -81,6 +81,7 @@ const state = {
   kitName: 'classic',
   bpm: 120,
   tapTimes: [],
+  masterLoop: null,
   keyEls: new Map(),
   // assign modal state
   assignSampleId: null,
@@ -768,6 +769,15 @@ function cyclePadLoop(padIndex, padEl) {
 
 function clearPadLoop(padIndex, padEl) {
   const loop = getOrInitLoop(padIndex);
+  // If we're clearing the master loop, promote the next playing loop to master.
+  if (state.masterLoop === loop) {
+    state.masterLoop = null;
+    state.padLoops.forEach((l, idx) => {
+      if (!state.masterLoop && l.status === 'playing' && idx !== padIndex) {
+        state.masterLoop = l;
+      }
+    });
+  }
   loop.status = 'idle';
   loop.taps = [];
   loop.loopLen = 0;
@@ -776,8 +786,9 @@ function clearPadLoop(padIndex, padEl) {
 }
 
 function finalizePadLoop(loop) {
-  const ctx = getAudio();
-  const duration = Math.max(0.05, ctx.currentTime - loop.recStart);
+  const ctx      = getAudio();
+  const now      = ctx.currentTime;
+  const duration = Math.max(0.05, now - loop.recStart);
 
   if (loop.taps.length === 0) {
     loop.status = 'idle';
@@ -785,13 +796,23 @@ function finalizePadLoop(loop) {
   }
 
   loop.taps.sort((a, b) => a.t - b.t);
-  // Use the actual recorded duration as the loop length — no BPM snapping.
-  // BPM snapping caused loopLen to drift from what was actually played,
-  // making hits fire at wrong times or not at all across cycles.
-  loop.loopLen    = duration;
-  loop.cycleStart = ctx.currentTime;
-  loop.nextIdx    = 0;
-  loop.status     = 'playing';
+  loop.loopLen = duration;
+  loop.nextIdx = 0;
+
+  if (!state.masterLoop) {
+    // First loop — becomes the master clock, starts immediately.
+    state.masterLoop = loop;
+    loop.cycleStart  = now;
+    loop.status      = 'playing';
+  } else {
+    // Subsequent loops — snap start to the next bar boundary of the master loop.
+    const master   = state.masterLoop;
+    const elapsed  = now - master.cycleStart;
+    const barsDone = Math.floor(elapsed / master.loopLen);
+    const nextBar  = master.cycleStart + (barsDone + 1) * master.loopLen;
+    loop.cycleStart = nextBar;
+    loop.status     = 'waiting';
+  }
 }
 
 function applyPadLoopVisual(padIndex, el) {
@@ -801,11 +822,11 @@ function applyPadLoopVisual(padIndex, el) {
   const status = loop ? loop.status : 'idle';
   const dot = el.querySelector('.pad-loop-dot');
   el.classList.toggle('loop-recording', status === 'recording');
-  el.classList.toggle('loop-playing',   status === 'playing');
+  el.classList.toggle('loop-playing',   status === 'playing' || status === 'waiting');
   el.classList.toggle('loop-paused',    status === 'paused');
   if (dot) {
     dot.classList.toggle('rec',     status === 'recording');
-    dot.classList.toggle('playing', status === 'playing');
+    dot.classList.toggle('playing', status === 'playing' || status === 'waiting');
     dot.classList.toggle('paused',  status === 'paused');
   }
 }
@@ -820,6 +841,15 @@ function loopSchedulerTick() {
   let anyActive = false;
 
   state.padLoops.forEach((loop, padIndex) => {
+    if (loop.status === 'waiting') {
+      anyActive = true;
+      // Flip to playing once the scheduled cycleStart arrives.
+      if (ctx.currentTime >= loop.cycleStart) {
+        loop.status = 'playing';
+        applyPadLoopVisual(padIndex, document.querySelectorAll('#drum-grid .pad')[padIndex]);
+      }
+      return;
+    }
     if (loop.status !== 'playing' || !loop.taps.length || !loop.loopLen) return;
     anyActive = true;
     const def = state.padDefs[padIndex];
@@ -1242,6 +1272,14 @@ function init() {
 
   document.addEventListener('touchstart', () => getAudio(), { once: true });
   document.addEventListener('mousedown',  () => getAudio(), { once: true });
+
+  // iOS scroll fix: panel-scroll divs must not let touchstart/touchmove bubble
+  // up to pad/key handlers that call preventDefault(), which kills scrolling.
+  // passive:true tells iOS this touch is safe to scroll with.
+  document.querySelectorAll('.panel-scroll').forEach(el => {
+    el.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
+    el.addEventListener('touchmove',  e => e.stopPropagation(), { passive: true });
+  });
 }
 
 init();
