@@ -794,54 +794,63 @@ function finalizePadLoop(loop) {
     return;
   }
 
-  loop.taps.sort((a, b) => a.t - b.t);
-
-  // Anchor the loop to the FIRST actual hit rather than to whenever the
-  // recording started — otherwise any lead-in silence before you play
-  // gets baked in as a phantom offset and corrupts the quantization grid
-  // for every pad that follows (since later pads sync to this one).
-  const leadIn = loop.taps[0].t;
-  loop.taps.forEach(tap => { tap.t -= leadIn; });
-  const lastTapTime = loop.taps[loop.taps.length - 1].t;
-  const recordedAt  = now - leadIn; // ctx-time corresponding to tap t=0
+  // Recover each tap's absolute audio-clock time (loop.recStart was the
+  // real ctx.currentTime when this pad's recording began). We need the
+  // absolute time — not time-relative-to-this-recording — so a secondary
+  // pad's hits can be measured against the master loop's actual running
+  // phase instead of being re-zeroed to "whenever this recording started."
+  loop.taps.forEach(tap => { tap.tAbs = loop.recStart + tap.t; });
+  loop.taps.sort((a, b) => a.tAbs - b.tAbs);
 
   loop.nextIdx = 0;
 
   if (!state.masterLoop) {
-    // First loop — becomes master clock. Use the tap-tempo BPM (or prior
-    // master grid) when there isn't enough rhythmic info from the taps
-    // themselves — e.g. a single kick hit — instead of guessing a beat
-    // length from raw recording duration, which includes trailing
-    // silence and produces a musically meaningless grid.
+    // First loop ever — there's no existing clock to sync to, so this
+    // one anchors itself to its own first hit. Lead-in silence before
+    // you played gets dropped so it doesn't become a phantom offset.
+    const leadIn = loop.taps[0].tAbs;
+    loop.taps.forEach(tap => { tap.t = tap.tAbs - leadIn; delete tap.tAbs; });
+    const lastTapTime = loop.taps[loop.taps.length - 1].t;
+
     state.masterLoop = loop;
 
+    // Use the tap-tempo BPM (or prior master grid) when there isn't enough
+    // rhythmic info from the taps themselves — e.g. a single kick hit —
+    // instead of guessing a beat length from raw recording duration.
     const beatLen  = deriveBeatLen(loop.taps, lastTapTime);
     const numBeats = Math.max(1, Math.round((lastTapTime + beatLen * 0.5) / beatLen) || 1);
     loop.loopLen   = numBeats * beatLen;
 
-    // Quantize hits to nearest 16th note (beatLen / 4), with full snap.
     quantizeTaps(loop.taps, beatLen, loop.loopLen);
 
-    loop.cycleStart = recordedAt;
-    loop.status     = 'playing';
+    loop.cycleStart = leadIn;
+    loop.status      = 'playing';
   } else {
-    // Subsequent loops — quantize hits to master beat grid, then snap
-    // loop start to next bar boundary.
+    // Subsequent loops — DO NOT re-anchor to this recording's own first
+    // hit. Instead, express each tap as its phase within the master
+    // loop's currently-running cycle, so a snare hit played "on beat 2"
+    // actually lands on beat 2, regardless of when you happened to start
+    // recording or what you happened to hit first.
     const master  = state.masterLoop;
     const beatLen = master.loopLen / 4;
 
-    // Snap this loop's length to a whole number of master bars,
-    // sized from the actual last tap, not total recording duration.
-    const numBars    = Math.max(1, Math.round(lastTapTime / master.loopLen) || 1);
-    loop.loopLen     = numBars * master.loopLen;
+    loop.taps.forEach(tap => {
+      let phase = (tap.tAbs - master.cycleStart) % master.loopLen;
+      if (phase < 0) phase += master.loopLen;
+      tap.t = phase;
+      delete tap.tAbs;
+    });
+    loop.taps.sort((a, b) => a.t - b.t);
 
+    // Share the master's bar length — keeps every pad's loop in lockstep.
+    loop.loopLen = master.loopLen;
     quantizeTaps(loop.taps, beatLen, loop.loopLen);
 
     const elapsed  = now - master.cycleStart;
     const barsDone = Math.floor(elapsed / master.loopLen);
     const nextBar  = master.cycleStart + (barsDone + 1) * master.loopLen;
     loop.cycleStart = nextBar;
-    loop.status     = 'waiting';
+    loop.status      = 'waiting';
   }
 }
 
