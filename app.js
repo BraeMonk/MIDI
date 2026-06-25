@@ -1,5 +1,5 @@
 /* ─────────────────────────────────────────────
-   RELAY — MIDI Controller PWA  ·  app.js v0.2.0
+   RELAY — MIDI Controller PWA  ·  app.js v0.2.1
    ───────────────────────────────────────────── */
 
 'use strict';
@@ -786,9 +786,8 @@ function clearPadLoop(padIndex, padEl) {
 }
 
 function finalizePadLoop(loop) {
-  const ctx      = getAudio();
-  const now      = ctx.currentTime;
-  const duration = Math.max(0.05, now - loop.recStart);
+  const ctx = getAudio();
+  const now = ctx.currentTime;
 
   if (loop.taps.length === 0) {
     loop.status = 'idle';
@@ -796,23 +795,34 @@ function finalizePadLoop(loop) {
   }
 
   loop.taps.sort((a, b) => a.t - b.t);
+
+  // Anchor the loop to the FIRST actual hit rather than to whenever the
+  // recording started — otherwise any lead-in silence before you play
+  // gets baked in as a phantom offset and corrupts the quantization grid
+  // for every pad that follows (since later pads sync to this one).
+  const leadIn = loop.taps[0].t;
+  loop.taps.forEach(tap => { tap.t -= leadIn; });
+  const lastTapTime = loop.taps[loop.taps.length - 1].t;
+  const recordedAt  = now - leadIn; // ctx-time corresponding to tap t=0
+
   loop.nextIdx = 0;
 
   if (!state.masterLoop) {
-    // First loop — becomes master clock. Snap its length to nearest beat so
-    // the grid is clean, then quantize hits within it.
+    // First loop — becomes master clock. Use the tap-tempo BPM (or prior
+    // master grid) when there isn't enough rhythmic info from the taps
+    // themselves — e.g. a single kick hit — instead of guessing a beat
+    // length from raw recording duration, which includes trailing
+    // silence and produces a musically meaningless grid.
     state.masterLoop = loop;
 
-    // Derive beat length from the actual tap intervals rather than assuming 4/4.
-    const beatLen  = deriveBeatLen(loop.taps, duration);
-    const numBeats = Math.max(1, Math.round(duration / beatLen));
+    const beatLen  = deriveBeatLen(loop.taps, lastTapTime);
+    const numBeats = Math.max(1, Math.round((lastTapTime + beatLen * 0.5) / beatLen) || 1);
     loop.loopLen   = numBeats * beatLen;
 
-    // Quantize hits to nearest 16th note (beatLen / 4), with 75% strength
-    // so some human feel is preserved.
+    // Quantize hits to nearest 16th note (beatLen / 4), with full snap.
     quantizeTaps(loop.taps, beatLen, loop.loopLen);
 
-    loop.cycleStart = now;
+    loop.cycleStart = recordedAt;
     loop.status     = 'playing';
   } else {
     // Subsequent loops — quantize hits to master beat grid, then snap
@@ -820,8 +830,9 @@ function finalizePadLoop(loop) {
     const master  = state.masterLoop;
     const beatLen = master.loopLen / 4;
 
-    // Snap this loop's length to a whole number of master bars
-    const numBars    = Math.max(1, Math.round(duration / master.loopLen));
+    // Snap this loop's length to a whole number of master bars,
+    // sized from the actual last tap, not total recording duration.
+    const numBars    = Math.max(1, Math.round(lastTapTime / master.loopLen) || 1);
     loop.loopLen     = numBars * master.loopLen;
 
     quantizeTaps(loop.taps, beatLen, loop.loopLen);
@@ -855,8 +866,15 @@ function quantizeTaps(taps, beatLen, loopLen) {
 
 // Derive beat length from tap timings using inter-tap intervals.
 // More reliable than duration/4 — works for 2, 3, 4 beat phrases.
+// Falls back to the user's tap-tempo BPM (or the existing master grid)
+// when there's only 0-1 taps to work with, since duration alone — which
+// includes lead-in/trailing silence — is not a meaningful beat estimate.
 function deriveBeatLen(taps, duration) {
-  if (taps.length < 2) return duration / 4;
+  if (taps.length < 2) {
+    if (state.masterLoop) return state.masterLoop.loopLen / 4;
+    if (state.bpm) return 60 / state.bpm;
+    return 0.5; // sane default: quarter note at 120bpm
+  }
   // Collect all inter-tap gaps
   const gaps = [];
   for (let i = 1; i < taps.length; i++) gaps.push(taps[i].t - taps[i-1].t);
