@@ -327,6 +327,32 @@ const KIT_PROFILES = {
 };
 
 function triggerDrum(def, velocity, el) {
+  // ── SAMPLE OVERRIDE ───────────────────────────
+  if (def.sampleId) {
+    const s = state.samples.find(smpl => smpl.id === def.sampleId);
+    if (s) {
+      const ctx   = getAudio();
+      const vel01 = velocity / 127;
+      const play  = (buf) => {
+        const src  = ctx.createBufferSource();
+        const gain = ctx.createGain();
+        src.buffer     = buf;
+        gain.gain.value = vel01;
+        src.connect(gain);
+        gain.connect(state.masterGain);
+        src.start();
+      };
+      if (s.buffer) {
+        play(s.buffer);
+      } else {
+        s.blob.arrayBuffer()
+          .then(ab => ctx.decodeAudioData(ab))
+          .then(buf => { s.buffer = buf; play(buf); });
+      }
+      return; // skip synth
+    }
+  }
+
   const ctx    = getAudio();
   const vel01  = velocity / 127;
   const now    = ctx.currentTime;
@@ -1014,9 +1040,16 @@ function renderSampleList() {
   });
 }
 
-function playSample(s) {
-  const audio = new Audio(s.url);
-  audio.play();
+async function playSample(s) {
+  const ctx = getAudio();
+  if (!s.buffer) {
+    const arrayBuf = await s.blob.arrayBuffer();
+    s.buffer = await ctx.decodeAudioData(arrayBuf);
+  }
+  const src = ctx.createBufferSource();
+  src.buffer = s.buffer;
+  src.connect(state.masterGain);
+  src.start();
 }
 
 function deleteSample(id) {
