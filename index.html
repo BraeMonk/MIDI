@@ -42,7 +42,7 @@
       color: var(--text);
       font-family: 'JetBrains Mono', monospace;
       -webkit-tap-highlight-color: transparent;
-      touch-action: none;
+      touch-action: manipulation;
       user-select: none;
     }
 
@@ -527,6 +527,7 @@
       flex: 1;
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
+      touch-action: pan-y;
       padding: 14px;
       display: flex;
       flex-direction: column;
@@ -772,6 +773,7 @@
       flex: 1;
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
+      touch-action: pan-y;
       padding: 14px;
       display: flex;
       flex-direction: column;
@@ -930,6 +932,18 @@
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
     #amp-panel .panel-scroll {
+      flex: 1;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      touch-action: pan-y;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      min-height: 0;
+    }
+
+    #looper-panel .panel-scroll {
       flex: 1;
       overflow-y: auto;
       -webkit-overflow-scrolling: touch;
