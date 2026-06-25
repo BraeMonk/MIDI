@@ -84,7 +84,14 @@ const state = {
   // assign modal state
   assignSampleId: null,
   assignPadIndex: null,
+  // pad loop sequencer
+  loopMode: false,
+  padLoops: new Map(), // padIndex -> { status, taps:[{t,vel}], loopLen, recStart, cycleStart, nextIdx }
+  loopSchedulerId: null,
 };
+
+const LONG_PRESS_MS = 550;
+const LOOP_TICK_MS  = 30;
 
 // ── KIT DEFINITIONS ────────────────────────────
 const KITS = {
@@ -535,32 +542,189 @@ function buildDrumGrid() {
     if (def.color) el.dataset.color = def.color;
     el.innerHTML = `
       <span class="pad-num">PAD ${i + 1}</span>
+      <span class="pad-loop-badge">↻</span>
       <span class="pad-name">${def.name}</span>
       <span class="pad-note">${noteName(def.note)}</span>
       <div class="pad-vel-bar"></div>
     `;
+    applyPadLoopVisual(i, el);
 
-    const fire = (e) => {
-      e.preventDefault();
-      getAudio();
-      let vel = 100;
-      if (e.touches) {
-        const touch = e.changedTouches[0];
-        const rect  = el.getBoundingClientRect();
-        const relY  = (touch.clientY - rect.top) / rect.height;
-        vel = applyVelCurve(Math.max(0, Math.min(1, relY)));
-      } else {
-        const rect = el.getBoundingClientRect();
-        const relY = (e.clientY - rect.top) / rect.height;
-        vel = applyVelCurve(Math.max(0, Math.min(1, relY)));
-      }
-      triggerDrum(def, vel, el);
+    let pressStart = 0;
+    let longPressFired = false;
+    let longPressTimer = null;
+
+    const velFromEvent = (e) => {
+      const point = e.changedTouches ? e.changedTouches[0] : e;
+      const rect  = el.getBoundingClientRect();
+      const relY  = (point.clientY - rect.top) / rect.height;
+      return applyVelCurve(Math.max(0, Math.min(1, relY)));
     };
 
-    el.addEventListener('touchstart', fire, { passive: false });
-    el.addEventListener('mousedown',  fire);
+    const onStart = (e) => {
+      e.preventDefault();
+      getAudio();
+      pressStart = performance.now();
+      longPressFired = false;
+      const vel = velFromEvent(e);
+
+      if (state.loopMode) {
+        const loop = state.padLoops.get(i);
+        longPressTimer = setTimeout(() => {
+          longPressFired = true;
+          handlePadLongPress(i, def, el);
+        }, LONG_PRESS_MS);
+        // tactile feedback / tap capture happens on release for short taps,
+        // but we still want an immediate sound if idle or recording.
+        if (!loop || loop.status === 'idle') {
+          triggerDrum(def, vel, el);
+        } else if (loop.status === 'recording') {
+          triggerDrum(def, vel, el);
+        }
+      } else {
+        triggerDrum(def, vel, el);
+      }
+    };
+
+    const onEnd = (e) => {
+      e.preventDefault();
+      clearTimeout(longPressTimer);
+      if (!state.loopMode || longPressFired) return;
+
+      const loop = state.padLoops.get(i);
+      const vel = velFromEvent(e);
+      if (loop && loop.status === 'recording') {
+        const ctx = getAudio();
+        loop.taps.push({ t: ctx.currentTime - loop.recStart, vel });
+      } else if (loop && (loop.status === 'playing' || loop.status === 'paused')) {
+        togglePauseLoop(i, def, el);
+      }
+    };
+
+    el.addEventListener('touchstart', onStart, { passive: false });
+    el.addEventListener('touchend',   onEnd,   { passive: false });
+    el.addEventListener('touchcancel', () => clearTimeout(longPressTimer), { passive: true });
+    el.addEventListener('mousedown', onStart);
+    el.addEventListener('mouseup',   onEnd);
     grid.appendChild(el);
   });
+}
+
+// ── PAD LOOP SEQUENCER ─────────────────────────
+// Each pad can memorize a tapped rhythm and loop it independently,
+// while still working as a normal one-shot pad outside loop mode.
+
+function getOrInitLoop(i) {
+  let loop = state.padLoops.get(i);
+  if (!loop) {
+    loop = { status: 'idle', taps: [], loopLen: 0, recStart: 0, cycleStart: 0, nextIdx: 0 };
+    state.padLoops.set(i, loop);
+  }
+  return loop;
+}
+
+function handlePadLongPress(padIndex, def, el) {
+  const ctx  = getAudio();
+  const loop = getOrInitLoop(padIndex);
+
+  if (loop.status === 'idle' || loop.status === 'paused' || loop.status === 'playing') {
+    if (loop.status === 'playing' || loop.status === 'paused') {
+      // Long-press on an existing loop clears it.
+      loop.status = 'idle';
+      loop.taps = [];
+      loop.loopLen = 0;
+    } else {
+      // Begin recording a fresh pattern.
+      loop.taps = [];
+      loop.recStart = ctx.currentTime;
+      loop.status = 'recording';
+    }
+  } else if (loop.status === 'recording') {
+    finalizePadLoop(padIndex, loop);
+  }
+
+  applyPadLoopVisual(padIndex, el);
+  ensureLoopScheduler();
+}
+
+function finalizePadLoop(padIndex, loop) {
+  const ctx = getAudio();
+  const duration = Math.max(0.05, ctx.currentTime - loop.recStart);
+
+  if (loop.taps.length === 0) {
+    // Nothing tapped — discard, back to idle.
+    loop.status = 'idle';
+    return;
+  }
+
+  const beatSec = 60 / state.bpm;
+  const lastTap = loop.taps[loop.taps.length - 1].t;
+  let beats = Math.max(1, Math.round(duration / beatSec));
+  let loopLen = beats * beatSec;
+  while (loopLen < lastTap + 0.05) { beats++; loopLen = beats * beatSec; }
+
+  loop.taps.sort((a, b) => a.t - b.t);
+  loop.loopLen     = loopLen;
+  loop.cycleStart  = ctx.currentTime;
+  loop.nextIdx     = 0;
+  loop.status      = 'playing';
+}
+
+function togglePauseLoop(padIndex, def, el) {
+  const loop = state.padLoops.get(padIndex);
+  if (!loop) return;
+  const ctx = getAudio();
+  if (loop.status === 'playing') {
+    loop.status = 'paused';
+  } else if (loop.status === 'paused') {
+    loop.cycleStart = ctx.currentTime;
+    loop.nextIdx = 0;
+    loop.status = 'playing';
+  }
+  applyPadLoopVisual(padIndex, el);
+}
+
+function applyPadLoopVisual(padIndex, el) {
+  if (!el) el = document.querySelectorAll('#drum-grid .pad')[padIndex];
+  if (!el) return;
+  const loop = state.padLoops.get(padIndex);
+  const status = loop ? loop.status : 'idle';
+  el.classList.toggle('loop-recording', status === 'recording');
+  el.classList.toggle('loop-playing',   status === 'playing');
+  el.classList.toggle('loop-paused',    status === 'paused');
+}
+
+function ensureLoopScheduler() {
+  if (state.loopSchedulerId) return;
+  state.loopSchedulerId = setInterval(loopSchedulerTick, LOOP_TICK_MS);
+}
+
+function loopSchedulerTick() {
+  const ctx = getAudio();
+  let anyActive = false;
+
+  state.padLoops.forEach((loop, padIndex) => {
+    if (loop.status !== 'playing') return;
+    anyActive = true;
+    const def = state.padDefs[padIndex];
+    const el  = document.querySelectorAll('#drum-grid .pad')[padIndex];
+    if (!def) return;
+
+    let guard = 0;
+    while (loop.taps.length && ctx.currentTime >= loop.cycleStart + loop.taps[loop.nextIdx].t && guard < 16) {
+      triggerDrum(def, loop.taps[loop.nextIdx].vel, el);
+      loop.nextIdx++;
+      if (loop.nextIdx >= loop.taps.length) {
+        loop.nextIdx = 0;
+        loop.cycleStart += loop.loopLen;
+      }
+      guard++;
+    }
+  });
+
+  if (!anyActive) {
+    clearInterval(state.loopSchedulerId);
+    state.loopSchedulerId = null;
+  }
 }
 
 // ── TAP TEMPO ──────────────────────────────────
@@ -851,6 +1015,14 @@ function initDrumToolbar() {
   });
 
   document.getElementById('tap-btn').addEventListener('click', tapTempo);
+
+  const loopBtn = document.getElementById('loop-mode-btn');
+  if (loopBtn) {
+    loopBtn.addEventListener('click', () => {
+      state.loopMode = !state.loopMode;
+      loopBtn.classList.toggle('active', state.loopMode);
+    });
+  }
 }
 
 // ── CONFIG / SETTINGS ──────────────────────────
