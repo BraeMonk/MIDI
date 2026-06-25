@@ -1096,6 +1096,13 @@ function confirmAssign() {
   buildPadAssignmentList();
 }
 
+function clearAssign() {
+  if (state.assignPadIndex === null) { closeAssignModal(); return; }
+  delete state.padDefs[state.assignPadIndex].sampleId;
+  closeAssignModal();
+  buildPadAssignmentList();
+}
+
 // ── PAD ASSIGNMENT CONFIG LIST ─────────────────
 function buildPadAssignmentList() {
   const container = document.getElementById('pad-assignment-list');
@@ -1306,6 +1313,7 @@ function initSettings() {
 function initAssignModal() {
   document.getElementById('assign-cancel').addEventListener('click',  closeAssignModal);
   document.getElementById('assign-confirm').addEventListener('click', confirmAssign);
+  document.getElementById('assign-clear').addEventListener('click',   clearAssign);
   document.getElementById('assign-modal').addEventListener('click', (e) => {
     if (e.target === e.currentTarget) closeAssignModal();
   });
