@@ -768,7 +768,8 @@
       text-transform: uppercase;
       cursor: pointer;
     }
-    .btn-modal.cancel { background: transparent; border: 1px solid var(--border); color: var(--text-dim); }
+    .btn-modal.cancel  { background: transparent; border: 1px solid var(--border); color: var(--text-dim); }
+    .btn-modal.clear   { background: var(--danger-dim); border: 1px solid var(--danger); color: var(--danger); }
     .btn-modal.confirm { background: var(--teal-dim); border: 1px solid var(--teal); color: var(--teal); }
 
     /* ─── CONFIG PANEL ───────────────────────────── */
@@ -1561,6 +1562,7 @@
     <div class="pad-pick-grid" id="pad-pick-grid"></div>
     <div class="modal-actions">
       <button class="btn-modal cancel" id="assign-cancel">Cancel</button>
+      <button class="btn-modal clear"  id="assign-clear">Clear Sample</button>
       <button class="btn-modal confirm" id="assign-confirm">Assign</button>
     </div>
   </div>
