@@ -8,7 +8,7 @@
 
 // ── PEDAL DEFINITIONS ─────────────────────────
 // Ordered as a classic guitar signal chain:
-// Tuner → Comp → Overdrive → Distortion → Fuzz → Gate → Wah → Octave → [amp] → Chorus → Flanger → Phaser → Tremolo → Delay → Reverb
+// Tuner → Comp → Gate → Wah → Octave → [amp] → Chorus → Flanger → Phaser → Tremolo → Delay → Reverb
 // (modulation + time effects go after amp drive in the chain)
 
 const PEDAL_DEFS = [
@@ -31,39 +31,6 @@ const PEDAL_DEFS = [
       { id: 'gain',      label: 'Make-up',   min: 0,   max: 24,  step: 0.5, default: 6,   unit: 'dB', fmt: v => v.toFixed(1) + ' dB' },
     ],
     build: buildCompressor,
-  },
-  {
-    id: 'overdrive',
-    name: 'Overdrive',
-    desc: 'Warm, tube-style soft clipping',
-    params: [
-      { id: 'drive', label: 'Drive', min: 0, max: 100, step: 1, default: 40, unit: '%', fmt: v => v.toFixed(0) + '%' },
-      { id: 'tone',  label: 'Tone',  min: 0, max: 100, step: 1, default: 60, unit: '%', fmt: v => v.toFixed(0) + '%' },
-      { id: 'level', label: 'Level', min: 0, max: 100, step: 1, default: 70, unit: '%', fmt: v => v.toFixed(0) + '%' },
-    ],
-    build: buildOverdrive,
-  },
-  {
-    id: 'distortion',
-    name: 'Distortion',
-    desc: 'Hard clipping, high-gain crunch',
-    params: [
-      { id: 'gain',  label: 'Gain',  min: 0, max: 100, step: 1, default: 55, unit: '%', fmt: v => v.toFixed(0) + '%' },
-      { id: 'tone',  label: 'Tone',  min: 0, max: 100, step: 1, default: 50, unit: '%', fmt: v => v.toFixed(0) + '%' },
-      { id: 'level', label: 'Level', min: 0, max: 100, step: 1, default: 60, unit: '%', fmt: v => v.toFixed(0) + '%' },
-    ],
-    build: buildDistortion,
-  },
-  {
-    id: 'fuzz',
-    name: 'Fuzz',
-    desc: 'Gnarly, saturated square-wave fuzz',
-    params: [
-      { id: 'fuzz',  label: 'Fuzz',  min: 0, max: 100, step: 1, default: 60, unit: '%', fmt: v => v.toFixed(0) + '%' },
-      { id: 'tone',  label: 'Tone',  min: 0, max: 100, step: 1, default: 40, unit: '%', fmt: v => v.toFixed(0) + '%' },
-      { id: 'level', label: 'Level', min: 0, max: 100, step: 1, default: 55, unit: '%', fmt: v => v.toFixed(0) + '%' },
-    ],
-    build: buildFuzz,
   },
   {
     id: 'noisegate',
@@ -232,6 +199,11 @@ function rewireChain(ctx) {
 
   prev.connect(fxState.chainOutput);
 
+  // Reconnect sourceNode → chainInput (disconnected above during the teardown pass)
+  if (state.amp && state.amp.sourceNode) {
+    state.amp.sourceNode.connect(fxState.chainInput);
+  }
+
   // Hook chainOutput into the amp input node (if amp is set up)
   if (state.amp && state.amp.nodes) {
     try { fxState.chainOutput.disconnect(state.amp.nodes.input); } catch(e) {}
@@ -282,134 +254,6 @@ function buildCompressor(ctx, params) {
     comp.release.value   = p.release / 1000;
     comp.knee.value      = 6;
     makeupG.gain.value   = Math.pow(10, p.gain / 20);
-  }
-  update(params);
-  return { input, output, bypass, update };
-}
-
-// ── DRIVE CURVES ──────────────────────────────
-// Each returns a Float32Array waveshaper curve for the given 0–1 amount.
-
-function odCurve(amount) {
-  // Soft, asymmetric "tube" style clip — gentle knee, op-amp-ish character
-  const n = 8192, curve = new Float32Array(n);
-  const k = 1 + amount * 60;
-  for (let i = 0; i < n; i++) {
-    const x = (i * 2) / n - 1;
-    // Slight asymmetry: positive half clips a touch earlier than negative
-    const bias = x >= 0 ? 1.0 : 0.92;
-    curve[i] = ((1 + k) * x * bias) / (1 + k * Math.abs(x * bias));
-  }
-  return curve;
-}
-
-function distCurve(amount) {
-  // Harder tanh-based clip — more aggressive knee, higher sustain
-  const n = 8192, curve = new Float32Array(n);
-  const k = 2 + amount * 18;
-  const norm = Math.tanh(k);
-  for (let i = 0; i < n; i++) {
-    const x = (i * 2) / n - 1;
-    curve[i] = Math.tanh(x * k) / norm;
-  }
-  return curve;
-}
-
-function fuzzCurve(amount) {
-  // Extreme near-square clipping with ragged edge for fuzz character
-  const n = 8192, curve = new Float32Array(n);
-  const thresh = Math.max(0.04, 1 - amount * 0.93);
-  const shapeExp = 1 - amount * 0.7; // lower exponent = squarer wave
-  for (let i = 0; i < n; i++) {
-    const x = (i * 2) / n - 1;
-    let y = Math.sign(x) * Math.pow(Math.abs(x), shapeExp);
-    if (Math.abs(y) > thresh) {
-      y = Math.sign(y) * (thresh + (Math.abs(y) - thresh) * 0.04);
-    }
-    curve[i] = y / (thresh + 0.04 * (1 - thresh)); // renormalize to ~unity peak
-  }
-  return curve;
-}
-
-function buildOverdrive(ctx, params) {
-  const input    = ctx.createGain();
-  const preGain  = ctx.createGain();
-  const shaper   = ctx.createWaveShaper();
-  const toneF    = ctx.createBiquadFilter();
-  const levelG   = ctx.createGain();
-  const output   = ctx.createGain();
-  const bypass   = makeBypass(ctx);
-
-  shaper.oversample = '4x';
-  toneF.type = 'lowpass';
-
-  input.connect(preGain);
-  preGain.connect(shaper);
-  shaper.connect(toneF);
-  toneF.connect(levelG);
-  levelG.connect(output);
-
-  function update(p) {
-    preGain.gain.value     = 1 + (p.drive / 100) * 5;
-    shaper.curve            = odCurve(p.drive / 100);
-    toneF.frequency.value   = 700 + (p.tone / 100) * 6800;
-    levelG.gain.value       = p.level / 100;
-  }
-  update(params);
-  return { input, output, bypass, update };
-}
-
-function buildDistortion(ctx, params) {
-  const input    = ctx.createGain();
-  const preGain  = ctx.createGain();
-  const shaper   = ctx.createWaveShaper();
-  const toneF    = ctx.createBiquadFilter();
-  const levelG   = ctx.createGain();
-  const output   = ctx.createGain();
-  const bypass   = makeBypass(ctx);
-
-  shaper.oversample = '4x';
-  toneF.type = 'lowpass';
-
-  input.connect(preGain);
-  preGain.connect(shaper);
-  shaper.connect(toneF);
-  toneF.connect(levelG);
-  levelG.connect(output);
-
-  function update(p) {
-    preGain.gain.value     = 1 + (p.gain / 100) * 9;
-    shaper.curve            = distCurve(p.gain / 100);
-    toneF.frequency.value   = 500 + (p.tone / 100) * 5500;
-    levelG.gain.value       = (p.level / 100) * 0.9;
-  }
-  update(params);
-  return { input, output, bypass, update };
-}
-
-function buildFuzz(ctx, params) {
-  const input    = ctx.createGain();
-  const preGain  = ctx.createGain();
-  const shaper   = ctx.createWaveShaper();
-  const toneF    = ctx.createBiquadFilter();
-  const levelG   = ctx.createGain();
-  const output   = ctx.createGain();
-  const bypass   = makeBypass(ctx);
-
-  shaper.oversample = '4x';
-  toneF.type = 'lowpass';
-
-  input.connect(preGain);
-  preGain.connect(shaper);
-  shaper.connect(toneF);
-  toneF.connect(levelG);
-  levelG.connect(output);
-
-  function update(p) {
-    preGain.gain.value     = 1 + (p.fuzz / 100) * 12;
-    shaper.curve            = fuzzCurve(p.fuzz / 100);
-    toneF.frequency.value   = 400 + (p.tone / 100) * 5000;
-    levelG.gain.value       = (p.level / 100) * 0.85;
   }
   update(params);
   return { input, output, bypass, update };
