@@ -771,7 +771,7 @@ function timeToNextBar(ctx) {
 function getOrInitLoop(i) {
   let loop = state.padLoops.get(i);
   if (!loop) {
-    loop = { status: 'idle', taps: [], nextIdx: 0 };
+    loop = { status: 'idle', taps: [], nextIdx: 0, cycleStart: 0 };
     state.padLoops.set(i, loop);
   }
   return loop;
@@ -796,16 +796,20 @@ function cyclePadLoop(padIndex, padEl) {
       // Nothing recorded — just cancel
       loop.status = 'idle';
     } else {
-      loop.nextIdx = 0;
-      loop.status  = 'playing';
+      loop.nextIdx   = 0;
+      loop.cycleStart = state.clockOrigin +
+        Math.floor((ctx.currentTime - state.clockOrigin) / state.loopLen) * state.loopLen;
+      loop.status    = 'playing';
     }
 
   } else if (loop.status === 'playing') {
     loop.status = 'paused';
 
   } else if (loop.status === 'paused') {
-    loop.nextIdx = advanceNextIdx(loop, gridPhase(ctx));
-    loop.status  = 'playing';
+    loop.nextIdx    = advanceNextIdx(loop, gridPhase(ctx));
+    loop.cycleStart = state.clockOrigin +
+      Math.floor((ctx.currentTime - state.clockOrigin) / state.loopLen) * state.loopLen;
+    loop.status     = 'playing';
   }
 
   applyPadLoopVisual(padIndex, padEl);
@@ -877,27 +881,29 @@ function loopSchedulerTick() {
     const el  = document.querySelectorAll('#drum-grid .pad')[padIndex];
     if (!def || state.clockOrigin === null) return;
 
-    // Resync if the tab was backgrounded and we fell way behind.
-    const elapsed   = ctx.currentTime - state.clockOrigin;
-    const barsDone  = Math.floor(elapsed / state.loopLen);
-    const cycleStart = state.clockOrigin + barsDone * state.loopLen;
-    const nextCycleStart = cycleStart + state.loopLen;
+    // Resync if tab was backgrounded and we fell way behind.
+    if (ctx.currentTime - loop.cycleStart > state.loopLen * 4) {
+      loop.cycleStart = state.clockOrigin +
+        Math.floor((ctx.currentTime - state.clockOrigin) / state.loopLen) * state.loopLen;
+      loop.nextIdx = advanceNextIdx(loop, gridPhase(ctx));
+    }
 
-    // Fire all taps whose absolute scheduled time has arrived.
-    // Guard against runaway loops (e.g. loopLen=0 edge case).
     let guard = 0;
     while (guard++ < loop.taps.length + 1) {
       const tap        = loop.taps[loop.nextIdx];
-      const tapAbsTime = cycleStart + tap.t;
+      const tapAbsTime = loop.cycleStart + tap.t;
 
       if (ctx.currentTime < tapAbsTime) break;
 
       triggerDrum(def, tap.vel, el);
       loop.nextIdx = (loop.nextIdx + 1) % loop.taps.length;
 
-      // If we've wrapped around, all remaining taps belong to the next cycle —
-      // break so we don't double-fire within the same tick.
-      if (loop.nextIdx === 0) break;
+      // Wrapped — advance cycleStart by one bar and stop;
+      // remaining taps belong to the new cycle.
+      if (loop.nextIdx === 0) {
+        loop.cycleStart += state.loopLen;
+        break;
+      }
     }
   });
 
