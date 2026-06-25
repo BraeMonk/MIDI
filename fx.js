@@ -442,13 +442,15 @@ function buildAutoWah(ctx, params) {
   const input    = ctx.createGain();
   const analyser = ctx.createAnalyser();
   const filter   = ctx.createBiquadFilter();
+  const makeup   = ctx.createGain();
   const output   = ctx.createGain();
   const bypass   = makeBypass(ctx);
 
   filter.type = 'bandpass';
   input.connect(analyser);
   input.connect(filter);
-  filter.connect(output);
+  filter.connect(makeup);
+  makeup.connect(output);
 
   analyser.fftSize = 256;
   const buf = new Uint8Array(analyser.frequencyBinCount);
@@ -473,6 +475,7 @@ function buildAutoWah(ctx, params) {
 
   function update(p) {
     filter.Q.value = p.resonance;
+    makeup.gain.value = 1 + p.resonance / 3;
   }
   update(params);
 
@@ -508,7 +511,10 @@ function buildOctaver(ctx, params) {
   upShaper.curve = upCurve;
 
   input.connect(dryGain);
-  input.connect(subRing);   subOsc.connect(subRing);  subRing.connect(subGain);
+  subRing.gain.value = 0;            // base offset for true ring-mod (multiplicative)
+  input.connect(subRing);            // signal → audio input
+  subOsc.connect(subRing.gain);      // oscillator → gain PARAM = actual ring modulation
+  subRing.connect(subGain);
   input.connect(upShaper);  upShaper.connect(upGain);
   dryGain.connect(output);
   subGain.connect(output);
@@ -758,8 +764,12 @@ function startTuner(ctx) {
   if (tunerRAF) return;
   tunerAnalyser = ctx.createAnalyser();
   tunerAnalyser.fftSize = 8192;
-  // Tap from chainInput
-  fxState.chainInput.connect(tunerAnalyser);
+
+  const tunerBoost = ctx.createGain();
+  tunerBoost.gain.value = 6;                 // NEW: raw input is too quiet to autocorrelate reliably
+  fxState.chainInput.connect(tunerBoost);    // CHANGED
+  tunerBoost.connect(tunerAnalyser);         // NEW
+  tunerAnalyser._boost = tunerBoost;         // NEW: so we can clean up
 
   const buf = new Float32Array(tunerAnalyser.fftSize);
   function tick() {
@@ -773,7 +783,11 @@ function startTuner(ctx) {
 
 function stopTuner() {
   if (tunerRAF) { cancelAnimationFrame(tunerRAF); tunerRAF = null; }
-  if (tunerAnalyser) { try { tunerAnalyser.disconnect(); } catch(e){} tunerAnalyser = null; }
+  if (tunerAnalyser) {
+    try { if (tunerAnalyser._boost) tunerAnalyser._boost.disconnect(); } catch(e){}
+    try { tunerAnalyser.disconnect(); } catch(e){}
+    tunerAnalyser = null;
+  }
 }
 
 function autoCorrelate(buf, sampleRate) {
