@@ -796,23 +796,68 @@ function finalizePadLoop(loop) {
   }
 
   loop.taps.sort((a, b) => a.t - b.t);
-  loop.loopLen = duration;
   loop.nextIdx = 0;
 
   if (!state.masterLoop) {
-    // First loop — becomes the master clock, starts immediately.
+    // First loop — becomes master clock. Snap its length to nearest beat so
+    // the grid is clean, then quantize hits within it.
     state.masterLoop = loop;
-    loop.cycleStart  = now;
-    loop.status      = 'playing';
+
+    // Estimate beat length: assume 4 beats per bar, find the beat that fits
+    // most naturally into the recorded duration.
+    const beatsPerBar = 4;
+    // Try common subdivisions to find the beat length that divides duration cleanly
+    let beatLen = duration / beatsPerBar;
+    // Round loop length to nearest beat so the bar boundary is clean
+    const numBeats = Math.max(1, Math.round(duration / beatLen));
+    loop.loopLen = numBeats * beatLen;
+
+    // Quantize hits to nearest 16th note (beatLen / 4), with 75% strength
+    // so some human feel is preserved.
+    quantizeTaps(loop.taps, beatLen, loop.loopLen);
+
+    loop.cycleStart = now;
+    loop.status     = 'playing';
   } else {
-    // Subsequent loops — snap start to the next bar boundary of the master loop.
-    const master   = state.masterLoop;
+    // Subsequent loops — quantize hits to master beat grid, then snap
+    // loop start to next bar boundary.
+    const master  = state.masterLoop;
+    const beatLen = master.loopLen / 4;
+
+    // Snap this loop's length to a whole number of master bars
+    const numBars    = Math.max(1, Math.round(duration / master.loopLen));
+    loop.loopLen     = numBars * master.loopLen;
+
+    quantizeTaps(loop.taps, beatLen, loop.loopLen);
+
     const elapsed  = now - master.cycleStart;
     const barsDone = Math.floor(elapsed / master.loopLen);
     const nextBar  = master.cycleStart + (barsDone + 1) * master.loopLen;
     loop.cycleStart = nextBar;
     loop.status     = 'waiting';
   }
+}
+
+// Quantize tap offsets to nearest 16th note grid with 75% strength.
+// strength=1.0 is perfectly on-grid; strength=0.75 preserves some feel.
+function quantizeTaps(taps, beatLen, loopLen) {
+  const sixteenth = beatLen / 4;
+  const strength  = 0.75;
+  taps.forEach(tap => {
+    const nearest   = Math.round(tap.t / sixteenth) * sixteenth;
+    // Clamp so no tap goes past the loop boundary
+    const clamped   = Math.min(nearest, loopLen - sixteenth * 0.5);
+    tap.t = tap.t + (clamped - tap.t) * strength;
+  });
+  // De-duplicate taps that quantized onto the same 16th slot — keep loudest
+  const seen = new Map();
+  taps.forEach(tap => {
+    const slot = Math.round(tap.t / (sixteenth * 0.1));
+    if (!seen.has(slot) || seen.get(slot).vel < tap.vel) seen.set(slot, tap);
+  });
+  taps.length = 0;
+  seen.forEach(tap => taps.push(tap));
+  taps.sort((a, b) => a.t - b.t);
 }
 
 function applyPadLoopVisual(padIndex, el) {
