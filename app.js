@@ -79,6 +79,7 @@ const state = {
     { name:'Crash',   note:49, color:'danger'  },
   ],
   kitName: 'classic',
+  bpm: 120,
   tapTimes: [],
   keyEls: new Map(),
   // assign modal state
@@ -661,7 +662,8 @@ function finalizePadLoop(loop) {
   }
 
   loop.taps.sort((a, b) => a.t - b.t);
-  const beatSec  = 60 / state.bpm;
+  const bpm     = state.bpm || 120;
+  const beatSec  = 60 / bpm;
   const lastTap  = loop.taps[loop.taps.length - 1].t;
   let beats   = Math.max(1, Math.round(duration / beatSec));
   let loopLen = beats * beatSec;
@@ -746,6 +748,7 @@ function tapTempo() {
   if (diffs[diffs.length - 1] > 2000) { state.tapTimes = [now]; return; }
   const avg = diffs.reduce((a, b) => a + b, 0) / diffs.length;
   const bpm = Math.round(60000 / avg);
+  state.bpm = bpm;
   document.getElementById('bpm-display').textContent = `${bpm} BPM`;
 }
 
