@@ -43,6 +43,39 @@ const PEDAL_DEFS = [
     build: buildNoiseGate,
   },
   {
+    id: 'overdrive',
+    name: 'Overdrive',
+    desc: 'Warm tube-style soft clipping',
+    params: [
+      { id: 'drive',  label: 'Drive',  min: 0, max: 100, step: 1, default: 40,  unit: '%', fmt: v => v.toFixed(0) + '%' },
+      { id: 'tone',   label: 'Tone',   min: 0, max: 100, step: 1, default: 55,  unit: '%', fmt: v => v.toFixed(0) + '%' },
+      { id: 'level',  label: 'Level',  min: 0, max: 100, step: 1, default: 60,  unit: '%', fmt: v => v.toFixed(0) + '%' },
+    ],
+    build: buildOverdrive,
+  },
+  {
+    id: 'distortion',
+    name: 'Distortion',
+    desc: 'Hard clipping with mid scoop',
+    params: [
+      { id: 'drive',  label: 'Drive',  min: 0, max: 100, step: 1, default: 65,  unit: '%', fmt: v => v.toFixed(0) + '%' },
+      { id: 'tone',   label: 'Tone',   min: 0, max: 100, step: 1, default: 50,  unit: '%', fmt: v => v.toFixed(0) + '%' },
+      { id: 'level',  label: 'Level',  min: 0, max: 100, step: 1, default: 55,  unit: '%', fmt: v => v.toFixed(0) + '%' },
+    ],
+    build: buildDistortion,
+  },
+  {
+    id: 'fuzz',
+    name: 'Fuzz',
+    desc: 'Vintage germanium-style clipping',
+    params: [
+      { id: 'fuzz',   label: 'Fuzz',   min: 0, max: 100, step: 1, default: 75,  unit: '%', fmt: v => v.toFixed(0) + '%' },
+      { id: 'tone',   label: 'Tone',   min: 0, max: 100, step: 1, default: 45,  unit: '%', fmt: v => v.toFixed(0) + '%' },
+      { id: 'level',  label: 'Level',  min: 0, max: 100, step: 1, default: 60,  unit: '%', fmt: v => v.toFixed(0) + '%' },
+    ],
+    build: buildFuzz,
+  },
+  {
     id: 'wah',
     name: 'Auto-Wah',
     desc: 'Envelope-triggered filter sweep',
@@ -285,6 +318,120 @@ function buildNoiseGate(ctx, params) {
 
   function update(p) {
     shaper.curve = makeCurve(p.threshold, p.smoothing);
+  }
+  update(params);
+  return { input, output, bypass, update };
+}
+
+function buildOverdrive(ctx, params) {
+  const input    = ctx.createGain();
+  const preGain  = ctx.createGain();
+  const shaper   = ctx.createWaveShaper(); shaper.oversample = '2x';
+  const toneF    = ctx.createBiquadFilter(); toneF.type = 'highshelf'; toneF.frequency.value = 1800;
+  const outGain  = ctx.createGain();
+  const output   = ctx.createGain();
+  const bypass   = makeBypass(ctx);
+
+  input.connect(preGain);
+  preGain.connect(shaper);
+  shaper.connect(toneF);
+  toneF.connect(outGain);
+  outGain.connect(output);
+
+  function makeCurve(drive) {
+    const n = 4096, curve = new Float32Array(n);
+    const k = drive * 0.12; // soft saturation amount
+    for (let i = 0; i < n; i++) {
+      const x = (i * 2) / n - 1;
+      // Soft clip: tanh with gentle knee
+      curve[i] = Math.tanh(x * (1 + k)) / Math.tanh(1 + k);
+    }
+    return curve;
+  }
+
+  function update(p) {
+    preGain.gain.value  = 1 + (p.drive / 100) * 8;
+    shaper.curve        = makeCurve(p.drive);
+    toneF.gain.value    = (p.tone - 50) / 50 * 10; // ±10 dB shelf
+    outGain.gain.value  = (p.level / 100) * 1.5;
+  }
+  update(params);
+  return { input, output, bypass, update };
+}
+
+function buildDistortion(ctx, params) {
+  const input    = ctx.createGain();
+  const preGain  = ctx.createGain();
+  const shaper   = ctx.createWaveShaper(); shaper.oversample = '4x';
+  const midCut   = ctx.createBiquadFilter(); midCut.type = 'peaking'; midCut.frequency.value = 700; midCut.Q.value = 0.8;
+  const toneF    = ctx.createBiquadFilter(); toneF.type = 'lowpass';
+  const outGain  = ctx.createGain();
+  const output   = ctx.createGain();
+  const bypass   = makeBypass(ctx);
+
+  input.connect(preGain);
+  preGain.connect(shaper);
+  shaper.connect(midCut);
+  midCut.connect(toneF);
+  toneF.connect(outGain);
+  outGain.connect(output);
+
+  function makeCurve(drive) {
+    const n = 4096, curve = new Float32Array(n);
+    const k = 1 + (drive / 100) * 20;
+    for (let i = 0; i < n; i++) {
+      const x = (i * 2) / n - 1;
+      // Hard clip with asymmetric edge for harmonics
+      const driven = x * k;
+      curve[i] = Math.max(-0.85, Math.min(1.0, driven));
+    }
+    return curve;
+  }
+
+  function update(p) {
+    preGain.gain.value  = 1 + (p.drive / 100) * 15;
+    shaper.curve        = makeCurve(p.drive);
+    midCut.gain.value   = -8; // classic DS-1-style mid scoop
+    toneF.frequency.value = 800 + (p.tone / 100) * 7200; // 800–8000 Hz
+    outGain.gain.value  = (p.level / 100) * 1.2;
+  }
+  update(params);
+  return { input, output, bypass, update };
+}
+
+function buildFuzz(ctx, params) {
+  const input    = ctx.createGain();
+  const preGain  = ctx.createGain();
+  const shaper   = ctx.createWaveShaper(); shaper.oversample = '4x';
+  const toneF    = ctx.createBiquadFilter(); toneF.type = 'lowpass';
+  const outGain  = ctx.createGain();
+  const output   = ctx.createGain();
+  const bypass   = makeBypass(ctx);
+
+  input.connect(preGain);
+  preGain.connect(shaper);
+  shaper.connect(toneF);
+  toneF.connect(outGain);
+  outGain.connect(output);
+
+  function makeCurve(fuzz) {
+    const n = 4096, curve = new Float32Array(n);
+    const k = 0.1 + (fuzz / 100) * 0.89; // 0.1–0.99 clip threshold
+    for (let i = 0; i < n; i++) {
+      const x = (i * 2) / n - 1;
+      // Square-wave-ish hard clip for vintage fuzz character
+      if (x > k)       curve[i] =  k + (x - k) * 0.05;
+      else if (x < -k) curve[i] = -k + (x + k) * 0.05;
+      else              curve[i] = x;
+    }
+    return curve;
+  }
+
+  function update(p) {
+    preGain.gain.value    = 2 + (p.fuzz / 100) * 20;
+    shaper.curve          = makeCurve(p.fuzz);
+    toneF.frequency.value = 500 + (p.tone / 100) * 4500; // 500–5000 Hz
+    outGain.gain.value    = (p.level / 100) * 1.0;
   }
   update(params);
   return { input, output, bypass, update };
