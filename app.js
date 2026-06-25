@@ -268,85 +268,208 @@ function panicAllNotes() {
 }
 
 // ── DRUM SYNTH ─────────────────────────────────
+// ── KIT SYNTH PROFILES ─────────────────────────
+// Each kit defines synthesis parameters per voice category.
+// freqStart/freqEnd: kick pitch sweep. decay: envelope length in seconds.
+// noiseFreq/noiseQ/noiseType: snare/hat filter. body: sine layer mix on snare (0=off).
+// tomPitches: [low,mid,hi] frequencies. crashDecay/rideDecay: cymbal lengths.
+const KIT_PROFILES = {
+  classic: {
+    // Warm, punchy 70s/80s rock kit — round kick, crisp snare, bright hats
+    kick:      { freqStart: 160, freqEnd: 42,  pitchTime: 0.10, decay: 0.45, drive: 1.0  },
+    snare:     { noiseFreq: 2800, noiseQ: 0.6, noiseType: 'bandpass', decay: 0.20, body: 0.35, bodyFreq: 200 },
+    hhClosed:  { hipass: 7500,  decay: 0.055, vol: 0.5 },
+    hhOpen:    { hipass: 6500,  decay: 0.30,  vol: 0.45 },
+    tom:       { pitches: [95, 135, 185], decay: 0.32, endFreq: 38 },
+    crash:     { decay: 0.9,  hipass: 5000, vol: 0.5 },
+    ride:      { decay: 0.5,  hipass: 6000, vol: 0.38 },
+    rim:       { freq: 1800,  Q: 2.0, decay: 0.07 },
+    cowbell:   { freq: 562,   decay: 0.45 },
+  },
+  electronic: {
+    // Tight, punchy electronic/dance kit — sub kick, sharp snare, metallic hats
+    kick:      { freqStart: 220, freqEnd: 28,  pitchTime: 0.06, decay: 0.30, drive: 1.3  },
+    snare:     { noiseFreq: 4500, noiseQ: 1.2, noiseType: 'bandpass', decay: 0.10, body: 0.15, bodyFreq: 240 },
+    hhClosed:  { hipass: 9000,  decay: 0.025, vol: 0.55 },
+    hhOpen:    { hipass: 8500,  decay: 0.18,  vol: 0.5  },
+    tom:       { pitches: [110, 155, 210], decay: 0.18, endFreq: 45 },
+    crash:     { decay: 0.55, hipass: 6500, vol: 0.45 },
+    ride:      { decay: 0.3,  hipass: 7500, vol: 0.4  },
+    rim:       { freq: 2200,  Q: 3.0, decay: 0.04 },
+    cowbell:   { freq: 800,   decay: 0.22 },
+  },
+  hiphop: {
+    // Boomy, slow-decay, lo-fi hip-hop — massive low kick, fat snare, dusty hats
+    kick:      { freqStart: 120, freqEnd: 32,  pitchTime: 0.18, decay: 0.70, drive: 0.9  },
+    snare:     { noiseFreq: 1800, noiseQ: 0.4, noiseType: 'bandpass', decay: 0.32, body: 0.6, bodyFreq: 155 },
+    hhClosed:  { hipass: 5500,  decay: 0.09,  vol: 0.35 },
+    hhOpen:    { hipass: 5000,  decay: 0.40,  vol: 0.32 },
+    tom:       { pitches: [70,  105, 150], decay: 0.50, endFreq: 28 },
+    crash:     { decay: 1.1,  hipass: 4000, vol: 0.4  },
+    ride:      { decay: 0.65, hipass: 5000, vol: 0.3  },
+    rim:       { freq: 1200,  Q: 1.5, decay: 0.10 },
+    cowbell:   { freq: 420,   decay: 0.60 },
+  },
+  acoustic: {
+    // Natural, roomy acoustic kit — woody toms, snappy snare with body, washy cymbals
+    kick:      { freqStart: 100, freqEnd: 48,  pitchTime: 0.14, decay: 0.55, drive: 0.85 },
+    snare:     { noiseFreq: 3500, noiseQ: 0.5, noiseType: 'bandpass', decay: 0.28, body: 0.8, bodyFreq: 175 },
+    hhClosed:  { hipass: 8000,  decay: 0.07,  vol: 0.42 },
+    hhOpen:    { hipass: 7000,  decay: 0.50,  vol: 0.38 },
+    tom:       { pitches: [88,  125, 170], decay: 0.45, endFreq: 42 },
+    crash:     { decay: 1.4,  hipass: 4500, vol: 0.55 },
+    ride:      { decay: 0.9,  hipass: 5500, vol: 0.45 },
+    rim:       { freq: 1500,  Q: 1.8, decay: 0.09 },
+    cowbell:   { freq: 562,   decay: 0.45 },
+  },
+};
+
 function triggerDrum(def, velocity, el) {
-  const ctx   = getAudio();
-  const vel01 = velocity / 127;
+  const ctx    = getAudio();
+  const vel01  = velocity / 127;
+  const now    = ctx.currentTime;
+  const prof   = KIT_PROFILES[state.kitName] || KIT_PROFILES.classic;
 
   if (def.note === 36 || def.note === 35) {
-    // Kick
+    // ── KICK ──────────────────────────────────────
+    const p = prof.kick;
     const osc  = ctx.createOscillator();
     const gain = ctx.createGain();
-    osc.frequency.setValueAtTime(180, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(40, ctx.currentTime + 0.12);
-    gain.gain.setValueAtTime(vel01, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+    // Add a click transient layer for punch
+    const click = ctx.createOscillator();
+    const cGain = ctx.createGain();
+    click.frequency.value = 1800;
+    cGain.gain.setValueAtTime(vel01 * 0.3 * p.drive, now);
+    cGain.gain.exponentialRampToValueAtTime(0.001, now + 0.012);
+    click.connect(cGain); cGain.connect(state.masterGain);
+    click.start(now); click.stop(now + 0.02);
+    // Main body
+    osc.frequency.setValueAtTime(p.freqStart, now);
+    osc.frequency.exponentialRampToValueAtTime(p.freqEnd, now + p.pitchTime);
+    gain.gain.setValueAtTime(vel01 * p.drive, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + p.decay);
     osc.connect(gain); gain.connect(state.masterGain);
-    osc.start(); osc.stop(ctx.currentTime + 0.4);
+    osc.start(now); osc.stop(now + p.decay);
+
   } else if (def.note === 38 || def.note === 40) {
-    // Snare
-    const buf  = ctx.createBuffer(1, ctx.sampleRate * 0.25, ctx.sampleRate);
+    // ── SNARE ─────────────────────────────────────
+    const p = prof.snare;
+    // Noise layer
+    const buf  = ctx.createBuffer(1, ctx.sampleRate * 0.4, ctx.sampleRate);
     const data = buf.getChannelData(0);
     for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
     const src  = ctx.createBufferSource();
     const filt = ctx.createBiquadFilter();
     const gain = ctx.createGain();
     src.buffer = buf;
-    filt.type = 'bandpass'; filt.frequency.value = 3000; filt.Q.value = 0.7;
-    gain.gain.setValueAtTime(vel01 * 0.7, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18);
+    filt.type = p.noiseType; filt.frequency.value = p.noiseFreq; filt.Q.value = p.noiseQ;
+    gain.gain.setValueAtTime(vel01 * 0.7, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + p.decay);
     src.connect(filt); filt.connect(gain); gain.connect(state.masterGain);
-    src.start();
+    src.start(now);
+    // Tonal body (gives snare its "crack" weight — more prominent in acoustic/hiphop)
+    if (p.body > 0) {
+      const osc  = ctx.createOscillator();
+      const oGain = ctx.createGain();
+      osc.frequency.setValueAtTime(p.bodyFreq, now);
+      osc.frequency.exponentialRampToValueAtTime(p.bodyFreq * 0.5, now + p.decay * 0.5);
+      oGain.gain.setValueAtTime(vel01 * p.body, now);
+      oGain.gain.exponentialRampToValueAtTime(0.001, now + p.decay * 0.6);
+      osc.connect(oGain); oGain.connect(state.masterGain);
+      osc.start(now); osc.stop(now + p.decay);
+    }
+
   } else if ([42, 44, 46].includes(def.note)) {
-    // Hi-hat
-    const buf  = ctx.createBuffer(1, ctx.sampleRate * 0.3, ctx.sampleRate);
+    // ── HI-HAT ────────────────────────────────────
+    const p = def.note === 46 ? prof.hhOpen : prof.hhClosed;
+    const buf  = ctx.createBuffer(1, ctx.sampleRate * 0.5, ctx.sampleRate);
     const data = buf.getChannelData(0);
-    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+    // Mix of white noise + metallic partials for realism
+    for (let i = 0; i < data.length; i++) {
+      data[i] = (Math.random() * 2 - 1) * 0.7 +
+                Math.sin(i * 0.29) * 0.15 +
+                Math.sin(i * 0.47) * 0.15;
+    }
     const src  = ctx.createBufferSource();
     const filt = ctx.createBiquadFilter();
     const gain = ctx.createGain();
     src.buffer = buf;
-    filt.type = 'highpass'; filt.frequency.value = 7000;
-    const dur = def.note === 46 ? 0.25 : 0.05;
-    gain.gain.setValueAtTime(vel01 * 0.5, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
+    filt.type = 'highpass'; filt.frequency.value = p.hipass;
+    gain.gain.setValueAtTime(vel01 * p.vol, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + p.decay);
     src.connect(filt); filt.connect(gain); gain.connect(state.masterGain);
-    src.start();
+    src.start(now);
+
   } else if (def.note === 37) {
-    // Rim / sidestick
-    const buf  = ctx.createBuffer(1, ctx.sampleRate * 0.08, ctx.sampleRate);
+    // ── RIM / SIDESTICK ───────────────────────────
+    const p = prof.rim;
+    const buf  = ctx.createBuffer(1, ctx.sampleRate * 0.12, ctx.sampleRate);
     const data = buf.getChannelData(0);
     for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
     const src  = ctx.createBufferSource();
     const filt = ctx.createBiquadFilter();
     const gain = ctx.createGain();
     src.buffer = buf;
-    filt.type = 'bandpass'; filt.frequency.value = 1800; filt.Q.value = 2;
-    gain.gain.setValueAtTime(vel01 * 0.6, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.07);
+    filt.type = 'bandpass'; filt.frequency.value = p.freq; filt.Q.value = p.Q;
+    gain.gain.setValueAtTime(vel01 * 0.6, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + p.decay);
     src.connect(filt); filt.connect(gain); gain.connect(state.masterGain);
-    src.start();
+    src.start(now);
+
   } else if (def.note === 55) {
-    // Cowbell
+    // ── COWBELL ───────────────────────────────────
+    const p = prof.cowbell;
     const osc  = ctx.createOscillator();
+    const osc2 = ctx.createOscillator();
     const gain = ctx.createGain();
-    osc.type = 'square';
-    osc.frequency.value = 562;
-    gain.gain.setValueAtTime(vel01 * 0.4, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
-    osc.connect(gain); gain.connect(state.masterGain);
-    osc.start(); osc.stop(ctx.currentTime + 0.45);
+    osc.type = 'square';  osc.frequency.value  = p.freq;
+    osc2.type = 'square'; osc2.frequency.value = p.freq * 1.47; // inharmonic partial
+    gain.gain.setValueAtTime(vel01 * 0.35, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + p.decay);
+    osc.connect(gain); osc2.connect(gain); gain.connect(state.masterGain);
+    osc.start(now); osc2.start(now);
+    osc.stop(now + p.decay); osc2.stop(now + p.decay);
+
   } else {
-    // Toms / ride / crash — pitched sine
-    const pitchMap = { 41:100, 43:120, 45:140, 48:170, 50:200, 49:220, 57:300 };
-    const osc  = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(pitchMap[def.note] || 150, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(40, ctx.currentTime + 0.25);
-    gain.gain.setValueAtTime(vel01 * 0.5, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
-    osc.connect(gain); gain.connect(state.masterGain);
-    osc.start(); osc.stop(ctx.currentTime + 0.35);
+    // ── TOMS / CRASH / RIDE ───────────────────────
+    const isCrash = def.note === 49;
+    const isRide  = def.note === 57;
+
+    if (isCrash || isRide) {
+      // Cymbal — layered noise with long decay
+      const cp = isCrash ? prof.crash : prof.ride;
+      const buf  = ctx.createBuffer(1, ctx.sampleRate * cp.decay * 1.2, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < data.length; i++) {
+        data[i] = (Math.random() * 2 - 1) * 0.6 +
+                  Math.sin(i * 0.31) * 0.2 +
+                  Math.sin(i * 0.53) * 0.2;
+      }
+      const src  = ctx.createBufferSource();
+      const filt = ctx.createBiquadFilter();
+      const gain = ctx.createGain();
+      src.buffer = buf;
+      filt.type = 'highpass'; filt.frequency.value = cp.hipass;
+      gain.gain.setValueAtTime(vel01 * cp.vol, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + cp.decay);
+      src.connect(filt); filt.connect(gain); gain.connect(state.masterGain);
+      src.start(now);
+    } else {
+      // Toms — pitched sine with kit-specific tuning
+      const tp = prof.tom;
+      const tomNoteToIdx = { 41:0, 43:0, 45:1, 48:1, 50:2 };
+      const pitchIdx = tomNoteToIdx[def.note] ?? 1;
+      const freq = tp.pitches[pitchIdx] || 130;
+      const osc  = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now);
+      osc.frequency.exponentialRampToValueAtTime(tp.endFreq, now + tp.decay * 0.7);
+      gain.gain.setValueAtTime(vel01 * 0.55, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + tp.decay);
+      osc.connect(gain); gain.connect(state.masterGain);
+      osc.start(now); osc.stop(now + tp.decay + 0.05);
+    }
   }
 
   sendMIDI(0x99, def.note, velocity); // ch 10
