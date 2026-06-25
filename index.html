@@ -48,6 +48,7 @@
 
     /* ─── APP SHELL ─────────────────────────────── */
     #app {
+      touch-action: pan-y;
       display: flex;
       flex-direction: column;
       height: 100dvh;
@@ -191,6 +192,7 @@
 
     /* ─── MAIN ───────────────────────────────────── */
     #main {
+      touch-action: pan-y;
       flex: 1;
       overflow: hidden;
       position: relative;
@@ -771,15 +773,15 @@
 
     /* ─── CONFIG PANEL ───────────────────────────── */
     #config-panel .panel-scroll {
-      flex: 1;
-      overflow-y: auto;
+      position: absolute;
+      inset: 0;
+      overflow-y: scroll;
       -webkit-overflow-scrolling: touch;
       touch-action: pan-y;
       padding: 14px;
       display: flex;
       flex-direction: column;
       gap: 14px;
-      min-height: 0;
     }
 
     .config-group {
