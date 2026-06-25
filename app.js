@@ -81,14 +81,15 @@ const state = {
   kitName: 'classic',
   bpm: 120,
   tapTimes: [],
-  masterLoop: null,
+  clockOrigin: null,   // AudioContext time the global bar grid started
+  loopLen: 0,          // shared bar length in seconds (set from BPM on first arm)
   keyEls: new Map(),
   // assign modal state
   assignSampleId: null,
   assignPadIndex: null,
   // pad loop sequencer
   loopMode: false,
-  padLoops: new Map(), // padIndex -> { status, taps:[{t,vel}], loopLen, recStart, cycleStart, nextIdx }
+  padLoops: new Map(), // padIndex -> { status, taps:[{t,vel}], nextIdx }
   loopSchedulerId: null,
 };
 
@@ -687,9 +688,12 @@ function buildDrumGrid() {
 
       if (state.loopMode) {
         const loop = state.padLoops.get(i);
-        if (loop && loop.status === 'recording') {
-          const ctx = getAudio();
-          loop.taps.push({ t: ctx.currentTime - loop.recStart, vel });
+        if (loop && loop.status === 'recording' && state.clockOrigin !== null) {
+          const ctx  = getAudio();
+          const raw  = (ctx.currentTime - state.clockOrigin) % state.loopLen;
+          const t    = quantizePhase(raw);
+          loop.taps.push({ t, vel });
+          loop.taps.sort((a, b) => a.t - b.t);
         }
       }
     };
@@ -733,13 +737,41 @@ function wireLoopDot(dot, padIndex, def, padEl) {
 }
 
 // ── PAD LOOP SEQUENCER ─────────────────────────
-// Each pad can memorize a tapped rhythm and loop it independently via
-// its own corner dot control, while normal pad hits stay untouched.
+// Clock-first design: the grid is established from BPM before any recording
+// starts. Every hit is stamped against that running clock, so bar length,
+// quantization, and multi-pad sync are all derived from one source of truth
+// and never need to be inferred from performance timing.
+//
+// state.clockOrigin  — AudioContext time when the global clock started (set
+//                      on first loop arm, never changes while loops are live)
+// state.loopLen      — bar length in seconds (beatLen * 4), shared by all pads
+//
+// Per-pad loop object: { status, taps:[{t,vel}], nextIdx }
+//   status: 'idle' | 'recording' | 'playing' | 'paused'
+//   taps:   [{t: offset-within-bar-in-seconds, vel: 1-127}]
+//   nextIdx: scheduler cursor into taps[]
+
+function gridBeatLen()  { return 60 / state.bpm; }
+function gridLoopLen()  { return gridBeatLen() * 4; }   // one 4/4 bar
+function gridSixteenth(){ return gridBeatLen() / 4; }
+
+// Current position within the bar, in seconds [0, loopLen)
+function gridPhase(ctx) {
+  if (state.clockOrigin === null) return 0;
+  return (ctx.currentTime - state.clockOrigin) % state.loopLen;
+}
+
+// How many seconds until the next bar boundary
+function timeToNextBar(ctx) {
+  const elapsed = ctx.currentTime - state.clockOrigin;
+  const barsDone = Math.floor(elapsed / state.loopLen);
+  return state.clockOrigin + (barsDone + 1) * state.loopLen - ctx.currentTime;
+}
 
 function getOrInitLoop(i) {
   let loop = state.padLoops.get(i);
   if (!loop) {
-    loop = { status: 'idle', taps: [], loopLen: 0, recStart: 0, cycleStart: 0, nextIdx: 0 };
+    loop = { status: 'idle', taps: [], nextIdx: 0 };
     state.padLoops.set(i, loop);
   }
   return loop;
@@ -750,17 +782,30 @@ function cyclePadLoop(padIndex, padEl) {
   const loop = getOrInitLoop(padIndex);
 
   if (loop.status === 'idle') {
-    loop.taps = [];
-    loop.recStart = ctx.currentTime;
+    // Start the global clock on the first ever arm, anchored to now.
+    // All subsequent pads share this same origin so they're always in phase.
+    if (state.clockOrigin === null) {
+      state.loopLen      = gridLoopLen();
+      state.clockOrigin  = ctx.currentTime;
+    }
+    loop.taps   = [];
     loop.status = 'recording';
+
   } else if (loop.status === 'recording') {
-    finalizePadLoop(loop);
+    if (loop.taps.length === 0) {
+      // Nothing recorded — just cancel
+      loop.status = 'idle';
+    } else {
+      loop.nextIdx = 0;
+      loop.status  = 'playing';
+    }
+
   } else if (loop.status === 'playing') {
     loop.status = 'paused';
+
   } else if (loop.status === 'paused') {
-    loop.cycleStart = ctx.currentTime;
-    loop.nextIdx = 0;
-    loop.status = 'playing';
+    loop.nextIdx = advanceNextIdx(loop, gridPhase(ctx));
+    loop.status  = 'playing';
   }
 
   applyPadLoopVisual(padIndex, padEl);
@@ -769,136 +814,47 @@ function cyclePadLoop(padIndex, padEl) {
 
 function clearPadLoop(padIndex, padEl) {
   const loop = getOrInitLoop(padIndex);
-  // If we're clearing the master loop, promote the next playing loop to master.
-  if (state.masterLoop === loop) {
-    state.masterLoop = null;
-    state.padLoops.forEach((l, idx) => {
-      if (!state.masterLoop && l.status === 'playing' && idx !== padIndex) {
-        state.masterLoop = l;
-      }
-    });
-  }
-  loop.status = 'idle';
-  loop.taps = [];
-  loop.loopLen = 0;
+  loop.status  = 'idle';
+  loop.taps    = [];
   loop.nextIdx = 0;
   applyPadLoopVisual(padIndex, padEl);
+
+  // If no loops are active any more, reset the global clock so the next
+  // session starts fresh with a clean origin.
+  let anyLive = false;
+  state.padLoops.forEach(l => { if (l.status !== 'idle') anyLive = true; });
+  if (!anyLive) state.clockOrigin = null;
 }
 
-function finalizePadLoop(loop) {
-  const ctx = getAudio();
-  const now = ctx.currentTime;
+// Quantize a raw phase offset (seconds within bar) to the nearest 16th slot.
+function quantizePhase(rawPhase) {
+  const s          = gridSixteenth();
+  const totalSlots = Math.round(state.loopLen / s);
+  let slot         = Math.round(rawPhase / s);
+  slot             = ((slot % totalSlots) + totalSlots) % totalSlots; // wrap, never clamp
+  return slot * s;
+}
 
-  if (loop.taps.length === 0) {
-    loop.status = 'idle';
-    return;
+// Find the nextIdx cursor for a loop resuming at currentPhase.
+function advanceNextIdx(loop, currentPhase) {
+  for (let i = 0; i < loop.taps.length; i++) {
+    if (loop.taps[i].t >= currentPhase) return i;
   }
-
-  // Recover each tap's absolute audio-clock time (loop.recStart was the
-  // real ctx.currentTime when this pad's recording began). We need the
-  // absolute time — not time-relative-to-this-recording — so a secondary
-  // pad's hits can be measured against the master loop's actual running
-  // phase instead of being re-zeroed to "whenever this recording started."
-  loop.taps.forEach(tap => { tap.tAbs = loop.recStart + tap.t; });
-  loop.taps.sort((a, b) => a.tAbs - b.tAbs);
-
-  loop.nextIdx = 0;
-
-  if (!state.masterLoop) {
-    // First loop ever — there's no existing clock to sync to, so this
-    // one anchors itself to its own first hit. Lead-in silence before
-    // you played gets dropped so it doesn't become a phantom offset.
-    const leadIn = loop.taps[0].tAbs;
-    loop.taps.forEach(tap => { tap.t = tap.tAbs - leadIn; delete tap.tAbs; });
-    const lastTapTime = loop.taps[loop.taps.length - 1].t;
-
-    state.masterLoop = loop;
-
-    const beatLen = deriveBeatLen(loop.taps, lastTapTime);
-    // Round loop length to the nearest full bar using the last tap as a
-    // lower bound, then snap up to the next bar boundary. This preserves
-    // the trailing silence between the last hit and the bar end — without
-    // it the loop restarts early and stutters. Single-tap recordings get
-    // a full 4-beat bar so there's a sensible grid for secondary pads.
-    const beatsRaw = (lastTapTime + beatLen) / beatLen; // +1 beat headroom
-    const numBeats = loop.taps.length < 2
-      ? 4
-      : Math.max(1, Math.ceil(beatsRaw / 4) * 4); // snap to 4-beat bars
-    loop.loopLen = numBeats * beatLen;
-
-    quantizeTaps(loop.taps, beatLen, loop.loopLen);
-
-    loop.cycleStart = leadIn;
-    loop.status      = 'playing';
-  } else {
-    // Subsequent loops — DO NOT re-anchor to this recording's own first
-    // hit. Instead, express each tap as its phase within the master
-    // loop's currently-running cycle, so a snare hit played "on beat 2"
-    // actually lands on beat 2, regardless of when you happened to start
-    // recording or what you happened to hit first.
-    const master  = state.masterLoop;
-    const beatLen = master.loopLen / 4;
-
-    loop.taps.forEach(tap => {
-      let phase = (tap.tAbs - master.cycleStart) % master.loopLen;
-      if (phase < 0) phase += master.loopLen;
-      tap.t = phase;
-      delete tap.tAbs;
-    });
-    loop.taps.sort((a, b) => a.t - b.t);
-
-    // Share the master's bar length — keeps every pad's loop in lockstep.
-    loop.loopLen = master.loopLen;
-    quantizeTaps(loop.taps, beatLen, loop.loopLen);
-
-    const elapsed  = now - master.cycleStart;
-    const barsDone = Math.floor(elapsed / master.loopLen);
-    const nextBar  = master.cycleStart + (barsDone + 1) * master.loopLen;
-    loop.cycleStart = nextBar;
-    loop.status      = 'waiting';
-  }
-}
-
-// Quantize tap offsets to nearest 16th note grid.
-// Wraps instead of clamping — a tap rounding past the bar end belongs at
-// beat 1 of the next cycle, not at loopLen-epsilon. De-duplication is
-// intentionally removed: two hits on the same 16th (e.g. layered accents,
-// fast hi-hat) are valid and should both fire.
-function quantizeTaps(taps, beatLen, loopLen) {
-  const sixteenth  = beatLen / 4;
-  const totalSlots = Math.round(loopLen / sixteenth);
-
-  taps.forEach(tap => {
-    let slot = Math.round(tap.t / sixteenth);
-    slot = ((slot % totalSlots) + totalSlots) % totalSlots;
-    tap.t = slot * sixteenth;
-  });
-
-  taps.sort((a, b) => a.t - b.t);
-}
-
-// Derive beat length from the user's tap-tempo BPM.
-// Inter-tap inference was too fragile for short patterns — it produced wrong
-// beat lengths that cascaded into bad loopLen, bad quantize slots, and
-// everything piling on beat 1. BPM is explicit and reliable; use it.
-function deriveBeatLen(taps, duration) {
-  if (state.masterLoop) return state.masterLoop.loopLen / 4;
-  if (state.bpm)        return 60 / state.bpm;
-  return 0.5; // sane default: quarter note at 120 bpm
+  return 0; // all taps are behind us — next hit is tap[0] in the next cycle
 }
 
 function applyPadLoopVisual(padIndex, el) {
   if (!el) el = document.querySelectorAll('#drum-grid .pad')[padIndex];
   if (!el) return;
-  const loop = state.padLoops.get(padIndex);
+  const loop   = state.padLoops.get(padIndex);
   const status = loop ? loop.status : 'idle';
-  const dot = el.querySelector('.pad-loop-dot');
+  const dot    = el.querySelector('.pad-loop-dot');
   el.classList.toggle('loop-recording', status === 'recording');
-  el.classList.toggle('loop-playing',   status === 'playing' || status === 'waiting');
+  el.classList.toggle('loop-playing',   status === 'playing');
   el.classList.toggle('loop-paused',    status === 'paused');
   if (dot) {
     dot.classList.toggle('rec',     status === 'recording');
-    dot.classList.toggle('playing', status === 'playing' || status === 'waiting');
+    dot.classList.toggle('playing', status === 'playing');
     dot.classList.toggle('paused',  status === 'paused');
   }
 }
@@ -909,43 +865,39 @@ function ensureLoopScheduler() {
 }
 
 function loopSchedulerTick() {
-  const ctx = getAudio();
-  let anyActive = false;
+  const ctx      = getAudio();
+  let anyActive  = false;
 
   state.padLoops.forEach((loop, padIndex) => {
-    if (loop.status === 'waiting') {
-      anyActive = true;
-      // Flip to playing once the scheduled cycleStart arrives.
-      if (ctx.currentTime >= loop.cycleStart) {
-        loop.status = 'playing';
-        applyPadLoopVisual(padIndex, document.querySelectorAll('#drum-grid .pad')[padIndex]);
-      }
-      return;
-    }
-    if (loop.status !== 'playing' || !loop.taps.length || !loop.loopLen) return;
+    if (loop.status !== 'playing' && loop.status !== 'recording') return;
     anyActive = true;
+    if (loop.status !== 'playing' || !loop.taps.length) return;
+
     const def = state.padDefs[padIndex];
     const el  = document.querySelectorAll('#drum-grid .pad')[padIndex];
-    if (!def) return;
+    if (!def || state.clockOrigin === null) return;
 
-    // If we've drifted way behind (tab was backgrounded, etc.), resync instead
-    // of firing a burst of catch-up hits.
-    if (ctx.currentTime - loop.cycleStart > loop.loopLen * 4) {
-      loop.cycleStart = ctx.currentTime;
-      loop.nextIdx = 0;
-      return;
-    }
+    // Resync if the tab was backgrounded and we fell way behind.
+    const elapsed   = ctx.currentTime - state.clockOrigin;
+    const barsDone  = Math.floor(elapsed / state.loopLen);
+    const cycleStart = state.clockOrigin + barsDone * state.loopLen;
+    const nextCycleStart = cycleStart + state.loopLen;
 
+    // Fire all taps whose absolute scheduled time has arrived.
+    // Guard against runaway loops (e.g. loopLen=0 edge case).
     let guard = 0;
-    while (guard < loop.taps.length + 1 &&
-           ctx.currentTime >= loop.cycleStart + loop.taps[loop.nextIdx].t) {
-      triggerDrum(def, loop.taps[loop.nextIdx].vel, el);
-      loop.nextIdx++;
-      if (loop.nextIdx >= loop.taps.length) {
-        loop.nextIdx = 0;
-        loop.cycleStart += loop.loopLen;
-      }
-      guard++;
+    while (guard++ < loop.taps.length + 1) {
+      const tap        = loop.taps[loop.nextIdx];
+      const tapAbsTime = cycleStart + tap.t;
+
+      if (ctx.currentTime < tapAbsTime) break;
+
+      triggerDrum(def, tap.vel, el);
+      loop.nextIdx = (loop.nextIdx + 1) % loop.taps.length;
+
+      // If we've wrapped around, all remaining taps belong to the next cycle —
+      // break so we don't double-fire within the same tick.
+      if (loop.nextIdx === 0) break;
     }
   });
 
