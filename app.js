@@ -814,20 +814,17 @@ function finalizePadLoop(loop) {
 
     state.masterLoop = loop;
 
-    // Use the tap-tempo BPM (or prior master grid) when there isn't enough
-    // rhythmic info from the taps themselves — e.g. a single kick hit —
-    // instead of guessing a beat length from raw recording duration.
     const beatLen = deriveBeatLen(loop.taps, lastTapTime);
-    // With fewer than 2 taps there's no rhythmic info to infer a phrase
-    // length from — default to a full 4-beat bar. Otherwise a 1-tap
-    // "timing reference" hit collapses the master loop to a single beat,
-    // and every other pad's hits get folded (% loopLen) into that tiny
-    // window, aliasing everything toward beat 1 regardless of where it
-    // was actually played.
+    // Round loop length to the nearest full bar using the last tap as a
+    // lower bound, then snap up to the next bar boundary. This preserves
+    // the trailing silence between the last hit and the bar end — without
+    // it the loop restarts early and stutters. Single-tap recordings get
+    // a full 4-beat bar so there's a sensible grid for secondary pads.
+    const beatsRaw = (lastTapTime + beatLen) / beatLen; // +1 beat headroom
     const numBeats = loop.taps.length < 2
       ? 4
-      : Math.max(1, Math.round((lastTapTime + beatLen * 0.5) / beatLen) || 1);
-    loop.loopLen  = numBeats * beatLen;
+      : Math.max(1, Math.ceil(beatsRaw / 4) * 4); // snap to 4-beat bars
+    loop.loopLen = numBeats * beatLen;
 
     quantizeTaps(loop.taps, beatLen, loop.loopLen);
 
@@ -862,54 +859,32 @@ function finalizePadLoop(loop) {
   }
 }
 
-// Quantize tap offsets to nearest 16th note grid, full snap.
+// Quantize tap offsets to nearest 16th note grid.
+// Wraps instead of clamping — a tap rounding past the bar end belongs at
+// beat 1 of the next cycle, not at loopLen-epsilon. De-duplication is
+// intentionally removed: two hits on the same 16th (e.g. layered accents,
+// fast hi-hat) are valid and should both fire.
 function quantizeTaps(taps, beatLen, loopLen) {
-  const sixteenth = beatLen / 4;
+  const sixteenth  = beatLen / 4;
+  const totalSlots = Math.round(loopLen / sixteenth);
+
   taps.forEach(tap => {
-    const nearest = Math.round(tap.t / sixteenth) * sixteenth;
-    // Clamp so no tap lands on or past the loop boundary
-    tap.t = Math.min(nearest, loopLen - sixteenth * 0.5);
+    let slot = Math.round(tap.t / sixteenth);
+    slot = ((slot % totalSlots) + totalSlots) % totalSlots;
+    tap.t = slot * sixteenth;
   });
-  // De-duplicate taps that landed on the same slot — keep loudest
-  const seen = new Map();
-  taps.forEach(tap => {
-    const slot = Math.round(tap.t / sixteenth);
-    if (!seen.has(slot) || seen.get(slot).vel < tap.vel) seen.set(slot, tap);
-  });
-  taps.length = 0;
-  seen.forEach(tap => taps.push(tap));
+
   taps.sort((a, b) => a.t - b.t);
 }
 
-// Derive beat length from tap timings using inter-tap intervals.
-// More reliable than duration/4 — works for 2, 3, 4 beat phrases.
-// Falls back to the user's tap-tempo BPM (or the existing master grid)
-// when there's only 0-1 taps to work with, since duration alone — which
-// includes lead-in/trailing silence — is not a meaningful beat estimate.
+// Derive beat length from the user's tap-tempo BPM.
+// Inter-tap inference was too fragile for short patterns — it produced wrong
+// beat lengths that cascaded into bad loopLen, bad quantize slots, and
+// everything piling on beat 1. BPM is explicit and reliable; use it.
 function deriveBeatLen(taps, duration) {
-  if (taps.length < 2) {
-    if (state.masterLoop) return state.masterLoop.loopLen / 4;
-    if (state.bpm) return 60 / state.bpm;
-    return 0.5; // sane default: quarter note at 120bpm
-  }
-  // Collect all inter-tap gaps
-  const gaps = [];
-  for (let i = 1; i < taps.length; i++) gaps.push(taps[i].t - taps[i-1].t);
-  // The shortest gap is likely a 16th or 8th — use median gap as beat estimate
-  gaps.sort((a, b) => a - b);
-  const median = gaps[Math.floor(gaps.length / 2)];
-  // Round to a musically sensible beat (assume median is 1 beat or subdivision)
-  // Try multipliers 1, 2, 4 and pick the one that divides duration most cleanly
-  let bestBeat = median;
-  let bestErr  = Infinity;
-  for (const mult of [0.25, 0.5, 1, 2]) {
-    const candidate = median * mult;
-    if (candidate < 0.1 || candidate > 2.0) continue; // ignore < 100ms or > 2s beats
-    const numBeats = duration / candidate;
-    const err = Math.abs(numBeats - Math.round(numBeats));
-    if (err < bestErr) { bestErr = err; bestBeat = candidate; }
-  }
-  return bestBeat;
+  if (state.masterLoop) return state.masterLoop.loopLen / 4;
+  if (state.bpm)        return 60 / state.bpm;
+  return 0.5; // sane default: quarter note at 120 bpm
 }
 
 function applyPadLoopVisual(padIndex, el) {
