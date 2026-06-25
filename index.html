@@ -462,36 +462,52 @@
       color: var(--text-dim);
       letter-spacing: 0.1em;
     }
-    .pad-loop-badge {
+    .pad-loop-dot {
       position: absolute;
-      top: 8px; left: 10px;
-      font-size: 13px;
-      color: var(--teal);
-      opacity: 0;
-      transition: opacity 0.15s, transform 0.15s;
+      bottom: 8px; right: 8px;
+      width: 24px; height: 24px;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      z-index: 3;
+      touch-action: none;
     }
-    .pad.loop-playing .pad-loop-badge,
-    .pad.loop-paused  .pad-loop-badge {
-      opacity: 1;
+    #drum-grid.loop-mode .pad-loop-dot { display: flex; }
+    .pad-loop-dot .dot-ring {
+      width: 9px; height: 9px;
+      border-radius: 50%;
+      border: 1.5px solid var(--text-dim);
+      transition: background 0.15s, border-color 0.15s;
     }
-    .pad.loop-paused .pad-loop-badge { color: var(--text-dim); }
-    .pad.loop-recording {
-      border-color: var(--danger);
+    .pad-loop-dot.rec .dot-ring {
+      background: var(--danger); border-color: var(--danger);
+    }
+    .pad-loop-dot.playing .dot-ring {
+      background: var(--teal); border-color: var(--teal);
+    }
+    .pad-loop-dot.paused .dot-ring {
+      background: transparent; border-color: var(--teal);
+    }
+    .pad-loop-dot.rec {
       animation: padLoopRecPulse 0.6s ease-in-out infinite;
     }
-    .pad.loop-playing {
+    .pad-loop-dot.playing {
       animation: padLoopPlayPulse 0.6s ease-in-out infinite;
     }
-    .pad.loop-paused {
-      border-color: var(--teal-dim);
-    }
+    .pad.loop-recording { border-color: var(--danger); }
+    .pad.loop-playing    { border-color: var(--teal); }
+    .pad.loop-paused     { border-color: var(--teal-dim); }
     @keyframes padLoopRecPulse {
-      0%, 100% { box-shadow: 0 0 6px var(--danger); }
-      50%      { box-shadow: 0 0 18px var(--danger); }
+      0%, 100% { box-shadow: 0 0 4px var(--danger); }
+      50%      { box-shadow: 0 0 12px var(--danger); }
     }
     @keyframes padLoopPlayPulse {
-      0%, 100% { box-shadow: 0 0 4px rgba(61,214,200,0.25); }
-      50%      { box-shadow: 0 0 14px rgba(61,214,200,0.55); }
+      0%, 100% { box-shadow: 0 0 3px rgba(61,214,200,0.4); }
+      50%      { box-shadow: 0 0 10px rgba(61,214,200,0.8); }
     }
     .pad-vel-bar {
       position: absolute;
