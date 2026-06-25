@@ -803,14 +803,10 @@ function finalizePadLoop(loop) {
     // the grid is clean, then quantize hits within it.
     state.masterLoop = loop;
 
-    // Estimate beat length: assume 4 beats per bar, find the beat that fits
-    // most naturally into the recorded duration.
-    const beatsPerBar = 4;
-    // Try common subdivisions to find the beat length that divides duration cleanly
-    let beatLen = duration / beatsPerBar;
-    // Round loop length to nearest beat so the bar boundary is clean
+    // Derive beat length from the actual tap intervals rather than assuming 4/4.
+    const beatLen  = deriveBeatLen(loop.taps, duration);
     const numBeats = Math.max(1, Math.round(duration / beatLen));
-    loop.loopLen = numBeats * beatLen;
+    loop.loopLen   = numBeats * beatLen;
 
     // Quantize hits to nearest 16th note (beatLen / 4), with 75% strength
     // so some human feel is preserved.
@@ -838,26 +834,47 @@ function finalizePadLoop(loop) {
   }
 }
 
-// Quantize tap offsets to nearest 16th note grid with 75% strength.
-// strength=1.0 is perfectly on-grid; strength=0.75 preserves some feel.
+// Quantize tap offsets to nearest 16th note grid, full snap.
 function quantizeTaps(taps, beatLen, loopLen) {
   const sixteenth = beatLen / 4;
-  const strength  = 0.75;
   taps.forEach(tap => {
-    const nearest   = Math.round(tap.t / sixteenth) * sixteenth;
-    // Clamp so no tap goes past the loop boundary
-    const clamped   = Math.min(nearest, loopLen - sixteenth * 0.5);
-    tap.t = tap.t + (clamped - tap.t) * strength;
+    const nearest = Math.round(tap.t / sixteenth) * sixteenth;
+    // Clamp so no tap lands on or past the loop boundary
+    tap.t = Math.min(nearest, loopLen - sixteenth * 0.5);
   });
-  // De-duplicate taps that quantized onto the same 16th slot — keep loudest
+  // De-duplicate taps that landed on the same slot — keep loudest
   const seen = new Map();
   taps.forEach(tap => {
-    const slot = Math.round(tap.t / (sixteenth * 0.1));
+    const slot = Math.round(tap.t / sixteenth);
     if (!seen.has(slot) || seen.get(slot).vel < tap.vel) seen.set(slot, tap);
   });
   taps.length = 0;
   seen.forEach(tap => taps.push(tap));
   taps.sort((a, b) => a.t - b.t);
+}
+
+// Derive beat length from tap timings using inter-tap intervals.
+// More reliable than duration/4 — works for 2, 3, 4 beat phrases.
+function deriveBeatLen(taps, duration) {
+  if (taps.length < 2) return duration / 4;
+  // Collect all inter-tap gaps
+  const gaps = [];
+  for (let i = 1; i < taps.length; i++) gaps.push(taps[i].t - taps[i-1].t);
+  // The shortest gap is likely a 16th or 8th — use median gap as beat estimate
+  gaps.sort((a, b) => a - b);
+  const median = gaps[Math.floor(gaps.length / 2)];
+  // Round to a musically sensible beat (assume median is 1 beat or subdivision)
+  // Try multipliers 1, 2, 4 and pick the one that divides duration most cleanly
+  let bestBeat = median;
+  let bestErr  = Infinity;
+  for (const mult of [0.25, 0.5, 1, 2]) {
+    const candidate = median * mult;
+    if (candidate < 0.1 || candidate > 2.0) continue; // ignore < 100ms or > 2s beats
+    const numBeats = duration / candidate;
+    const err = Math.abs(numBeats - Math.round(numBeats));
+    if (err < bestErr) { bestErr = err; bestBeat = candidate; }
+  }
+  return bestBeat;
 }
 
 function applyPadLoopVisual(padIndex, el) {
