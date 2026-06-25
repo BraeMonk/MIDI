@@ -205,11 +205,12 @@ function initFXChain() {
 
 // Connect all pedals in series, bypassing inactive ones via passthrough gains.
 function rewireChain(ctx) {
-  // Disconnect everything first
+  // Only disconnect inter-pedal connections (output/bypass downstream).
+  // Do NOT call p.nodes.input.disconnect() — it has no args and would also
+  // sever the internal graph (input→preGain etc), killing the pedal's audio.
   try { fxState.chainInput.disconnect(); } catch(e) {}
   Object.values(fxState.pedals).forEach(p => {
     if (!p.nodes) return;
-    try { p.nodes.input.disconnect(); }  catch(e) {}
     try { p.nodes.output.disconnect(); } catch(e) {}
     try { p.nodes.bypass.disconnect(); } catch(e) {}
   });
