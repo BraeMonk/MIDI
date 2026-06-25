@@ -662,14 +662,10 @@ function finalizePadLoop(loop) {
   }
 
   loop.taps.sort((a, b) => a.t - b.t);
-  const bpm     = state.bpm || 120;
-  const beatSec  = 60 / bpm;
-  const lastTap  = loop.taps[loop.taps.length - 1].t;
-  let beats   = Math.max(1, Math.round(duration / beatSec));
-  let loopLen = beats * beatSec;
-  while (loopLen < lastTap + 0.05) { beats++; loopLen = beats * beatSec; }
-
-  loop.loopLen    = loopLen;
+  // Use the actual recorded duration as the loop length — no BPM snapping.
+  // BPM snapping caused loopLen to drift from what was actually played,
+  // making hits fire at wrong times or not at all across cycles.
+  loop.loopLen    = duration;
   loop.cycleStart = ctx.currentTime;
   loop.nextIdx    = 0;
   loop.status     = 'playing';
