@@ -21,7 +21,30 @@ function getAudio() {
   return audioCtx;
 }
 
-// ── MIDI NOTE MATH ─────────────────────────────
+// ── DRUM NOISE BUFFER CACHE ────────────────────
+// Snare and hi-hat synthesis fill a noise buffer on every hit.
+// Pre-generating once and reusing avoids per-hit allocation spikes
+// that can nuke the audio graph when a drum bot fires rapidly.
+const _noiseCache = {};
+function getNoiseBuf(ctx, seconds, key) {
+  if (_noiseCache[key] && _noiseCache[key].ctx === ctx) return _noiseCache[key].buf;
+  const len = Math.ceil(ctx.sampleRate * seconds);
+  const buf  = ctx.createBuffer(1, len, ctx.sampleRate);
+  const data = buf.getChannelData(0);
+  if (key === 'hat') {
+    for (let i = 0; i < len; i++) {
+      data[i] = (Math.random() * 2 - 1) * 0.7 +
+                Math.sin(i * 0.29) * 0.15 +
+                Math.sin(i * 0.47) * 0.15;
+    }
+  } else {
+    for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+  }
+  _noiseCache[key] = { ctx, buf };
+  return buf;
+}
+
+
 const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
 function noteName(n)  { return NOTE_NAMES[n % 12] + Math.floor(n / 12 - 1); }
 function noteFreq(n)  { return 440 * Math.pow(2, (n - 69) / 12); }
@@ -386,10 +409,8 @@ function triggerDrum(def, velocity, el) {
   } else if (def.note === 38 || def.note === 40) {
     // ── SNARE ─────────────────────────────────────
     const p = prof.snare;
-    // Noise layer
-    const buf  = ctx.createBuffer(1, ctx.sampleRate * 0.4, ctx.sampleRate);
-    const data = buf.getChannelData(0);
-    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+    // Noise layer (buffer pre-generated and cached — avoids per-hit allocation)
+    const buf  = getNoiseBuf(ctx, 0.4, 'snare');
     const src  = ctx.createBufferSource();
     const filt = ctx.createBiquadFilter();
     const gain = ctx.createGain();
@@ -414,14 +435,7 @@ function triggerDrum(def, velocity, el) {
   } else if ([42, 44, 46].includes(def.note)) {
     // ── HI-HAT ────────────────────────────────────
     const p = def.note === 46 ? prof.hhOpen : prof.hhClosed;
-    const buf  = ctx.createBuffer(1, ctx.sampleRate * 0.5, ctx.sampleRate);
-    const data = buf.getChannelData(0);
-    // Mix of white noise + metallic partials for realism
-    for (let i = 0; i < data.length; i++) {
-      data[i] = (Math.random() * 2 - 1) * 0.7 +
-                Math.sin(i * 0.29) * 0.15 +
-                Math.sin(i * 0.47) * 0.15;
-    }
+    const buf  = getNoiseBuf(ctx, 0.5, 'hat');
     const src  = ctx.createBufferSource();
     const filt = ctx.createBiquadFilter();
     const gain = ctx.createGain();
@@ -435,9 +449,7 @@ function triggerDrum(def, velocity, el) {
   } else if (def.note === 37) {
     // ── RIM / SIDESTICK ───────────────────────────
     const p = prof.rim;
-    const buf  = ctx.createBuffer(1, ctx.sampleRate * 0.12, ctx.sampleRate);
-    const data = buf.getChannelData(0);
-    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+    const buf  = getNoiseBuf(ctx, 0.12, 'rim');
     const src  = ctx.createBufferSource();
     const filt = ctx.createBiquadFilter();
     const gain = ctx.createGain();
