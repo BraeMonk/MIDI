@@ -453,7 +453,7 @@ function buildAutoWah(ctx, params) {
   makeup.connect(output);
 
   analyser.fftSize = 256;
-  const buf = new Uint8Array(analyser.frequencyBinCount);
+  const buf = new Uint8Array(analyser.fftSize); // was frequencyBinCount (half size) — undersampled the envelope
 
   let raf = null;
   function tick() {
@@ -490,7 +490,7 @@ function buildOctaver(ctx, params) {
 
   // Dry path
   const dryGain  = ctx.createGain();
-  // Sub-octave: ring modulate with half-freq sine (approximation)
+  // Sub-octave: ring modulate with a sine that TRACKS the detected pitch ÷2
   const subOsc   = ctx.createOscillator();
   const subRing  = ctx.createGain();
   const subGain  = ctx.createGain();
@@ -498,8 +498,24 @@ function buildOctaver(ctx, params) {
   const upShaper = ctx.createWaveShaper();
   const upGain   = ctx.createGain();
 
+  // Pitch-tracking analyser feeding subOsc.frequency
+  const trackAnalyser = ctx.createAnalyser();
+  trackAnalyser.fftSize = 2048;
+  input.connect(trackAnalyser);
+  const trackBuf = new Float32Array(trackAnalyser.fftSize);
+  let trackRAF = null;
+  function trackPitch() {
+    trackRAF = requestAnimationFrame(trackPitch);
+    trackAnalyser.getFloatTimeDomainData(trackBuf);
+    const freq = autoCorrelate(trackBuf, ctx.sampleRate);
+    if (freq > 20 && freq < 1500) {
+      subOsc.frequency.setTargetAtTime(freq / 2, ctx.currentTime, 0.03);
+    }
+  }
+  trackPitch();
+
   // Sub octave via ring mod trick
-  subOsc.frequency.value = 55; // will track input loosely — good enough for guitar
+  subOsc.frequency.value = 55; // initial guess until pitch tracking kicks in
   subOsc.type = 'sine';
   subOsc.start();
 
@@ -526,10 +542,8 @@ function buildOctaver(ctx, params) {
     upGain.gain.value  = p.upLevel  / 100;
   }
   update(params);
-  return { input, output, bypass, update };
+  return { input, output, bypass, update, _stopRAF: () => cancelAnimationFrame(trackRAF) };
 }
-
-function buildChorus(ctx, params) {
   const input   = ctx.createGain();
   const output  = ctx.createGain();
   const bypass  = makeBypass(ctx);
@@ -762,14 +776,26 @@ let tunerAnalyser = null;
 
 function startTuner(ctx) {
   if (tunerRAF) return;
+
+  // chainInput may not exist yet if the amp source hasn't connected through
+  // initFXChain() yet. Fall back to tapping the raw amp source directly so
+  // the tuner still works instead of throwing and silently dying.
+  const tapNode = fxState.chainInput || (state.amp && state.amp.sourceNode) || null;
+  if (!tapNode) {
+    updateTunerDisplay(-1);
+    const noteEl = document.getElementById('tuner-cents');
+    if (noteEl) noteEl.textContent = 'No input connected';
+    return;
+  }
+
   tunerAnalyser = ctx.createAnalyser();
   tunerAnalyser.fftSize = 8192;
 
   const tunerBoost = ctx.createGain();
-  tunerBoost.gain.value = 6;                 // NEW: raw input is too quiet to autocorrelate reliably
-  fxState.chainInput.connect(tunerBoost);    // CHANGED
-  tunerBoost.connect(tunerAnalyser);         // NEW
-  tunerAnalyser._boost = tunerBoost;         // NEW: so we can clean up
+  tunerBoost.gain.value = 6;                 // raw input is too quiet to autocorrelate reliably
+  tapNode.connect(tunerBoost);
+  tunerBoost.connect(tunerAnalyser);
+  tunerAnalyser._boost = tunerBoost;         // so we can clean up
 
   const buf = new Float32Array(tunerAnalyser.fftSize);
   function tick() {
@@ -804,15 +830,24 @@ function autoCorrelate(buf, sampleRate) {
   for (let i = 1; i < buf.length / 2; i++) { if (Math.abs(buf[buf.length - i]) < thres) { r2 = buf.length - i; break; } }
 
   const slice = buf.slice(r1, r2);
-  const c = new Float32Array(slice.length * 2);
-  for (let i = 0; i < slice.length; i++) for (let j = 0; j < slice.length; j++) c[i + j] += slice[i] * slice[j];
+  const n = slice.length;
+  // True autocorrelation: c[lag] = Σ slice[i] * slice[i+lag]
+  const c = new Float32Array(n);
+  for (let lag = 0; lag < n; lag++) {
+    let sum = 0;
+    for (let i = 0; i < n - lag; i++) sum += slice[i] * slice[i + lag];
+    c[lag] = sum;
+  }
 
-  let d = c.length / 2, maxVal = -1, maxIdx = -1;
-  for (let i = d / 2; i < d; i++) { if (c[i] > maxVal) { maxVal = c[i]; maxIdx = i; } }
-  if (maxIdx < 1) return -1;
+  // Walk past the initial downslope from lag 0, then find the first/best peak
+  let d = 0;
+  while (d + 1 < n && c[d] > c[d + 1]) d++;
+  let maxVal = -1, maxIdx = -1;
+  for (let i = d; i < n; i++) { if (c[i] > maxVal) { maxVal = c[i]; maxIdx = i; } }
+  if (maxIdx < 1 || maxIdx >= n - 1) return -1;
 
   // Parabolic interpolation for sub-sample accuracy
-  let y1 = c[maxIdx - 1], y2 = c[maxIdx], y3 = c[maxIdx + 1] || 0;
+  let y1 = c[maxIdx - 1], y2 = c[maxIdx], y3 = c[maxIdx + 1];
   let shift = (y3 - y1) / (2 * (2 * y2 - y1 - y3));
   return sampleRate / (maxIdx + shift);
 }
@@ -870,8 +905,11 @@ function buildFXUI() {
           <div class="tuner-bar-wrap"><div class="tuner-bar" id="tuner-bar"></div></div>
         </div>
       `;
-      const header = el.querySelector('.pedal-header');
-      header.addEventListener('click', () => togglePedal(def.id, el));
+      const bypassDot = el.querySelector('.pedal-bypass');
+      bypassDot.addEventListener('click', (e) => {
+        e.stopPropagation();
+        togglePedal(def.id, el);
+      });
       list.appendChild(el);
       return;
     }
@@ -896,7 +934,21 @@ function buildFXUI() {
     `;
 
     const header = el.querySelector('.pedal-header');
-    header.addEventListener('click', () => togglePedal(def.id, el));
+    const bypassDot = el.querySelector('.pedal-bypass');
+
+    // Footswitch dot: ONLY thing that turns the pedal on/off.
+    bypassDot.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setPedalActive(def.id, el, !pedal.active);
+    });
+
+    // Header (name/desc area): ONLY expands/collapses the controls.
+    // Does not touch active state, so there's no on/off ambiguity to fight with.
+    header.addEventListener('click', (e) => {
+      if (e.target === bypassDot || bypassDot.contains(e.target)) return;
+      pedal.open = !pedal.open;
+      el.classList.toggle('open', pedal.open);
+    });
 
     // Wire sliders
     (def.params || []).forEach((p, i) => {
@@ -940,20 +992,6 @@ function togglePedal(id, el) {
     else              stopTuner();
     return;
   }
-
-  // Single tap header = toggle active; if already active, also toggle open
-  if (!pedal.active) {
-    setPedalActive(id, el, true);
-    pedal.open = true;
-    el.classList.add('open');
-  } else {
-    pedal.open = !pedal.open;
-    el.classList.toggle('open', pedal.open);
-    if (!pedal.open) {
-      // Second tap collapses; third would re-expand or deactivate on long-press
-      // For simplicity: tap header again to deactivate
-    }
-  }
 }
 
 function setPedalActive(id, el, active) {
@@ -966,16 +1004,9 @@ function setPedalActive(id, el, active) {
   if (fxState.chainInput) rewireChain(getAudio());
 }
 
-// Long-press header to deactivate
-function wireHeaderLongPress(el, id) {
-  let timer = null;
-  const header = el.querySelector('.pedal-header');
-  const start = () => { timer = setTimeout(() => { timer = null; setPedalActive(id, el, false); }, 500); };
-  const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } };
-  header.addEventListener('touchstart', start, { passive: true });
-  header.addEventListener('touchend',   cancel, { passive: true });
-  header.addEventListener('touchcancel',cancel, { passive: true });
-}
+// (Per-pedal on/off is now handled entirely by the footswitch dot's click
+// handler in buildFXUI — no long-press needed, and no race with the
+// browser's synthetic click-after-touchend that used to re-enable pedals.)
 
 // ── PATCH AMP CONNECTION ──────────────────────
 // Override the amp module's source connection to route through FX.
@@ -1021,12 +1052,6 @@ function initFX() {
   });
 
   buildFXUI();
-
-  // Wire long-press on all pedal headers for deactivation
-  PEDAL_DEFS.forEach(def => {
-    const el = document.getElementById('pedal-' + def.id);
-    if (el) wireHeaderLongPress(el, def.id);
-  });
 
   // Watch for amp source to patch into FX chain
   watchForAmpSource();
