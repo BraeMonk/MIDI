@@ -1197,6 +1197,37 @@
     }
     .tuner-bar.in-tune { background: var(--teal); box-shadow: 0 0 6px var(--teal); }
 
+    /* ─── BPM INPUT ──────────────────────────────── */
+    .bpm-input {
+      width: 58px;
+      height: 28px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      color: var(--amber);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 0 6px;
+      outline: none;
+      flex-shrink: 0;
+      text-align: center;
+      -moz-appearance: textfield;
+      appearance: textfield;
+      transition: border-color 0.12s;
+    }
+    .bpm-input::-webkit-inner-spin-button,
+    .bpm-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+    .bpm-input:focus { border-color: var(--amber); }
+    .bpm-input::placeholder { color: var(--text-dim); font-weight: 400; }
+
+    /* TAP prompt flash when tap is required before arming a loop */
+    @keyframes tapPromptFlash {
+      0%,100% { border-color: var(--border); color: var(--text-dim); }
+      25%,75%  { border-color: var(--amber); color: var(--amber); box-shadow: 0 0 8px var(--amber-glow); }
+    }
+    #tap-btn.prompt-flash { animation: tapPromptFlash 0.35s ease-in-out 3; }
+
 </style>
 </head>
 <body>
@@ -1301,7 +1332,7 @@
           <button class="pill" data-kit="acoustic">Acoustic</button>
         </div>
         <div class="toolbar-spacer"></div>
-        <span class="toolbar-label" id="bpm-display" style="color:var(--text-mid);">— BPM</span>
+        <input type="number" id="bpm-input" class="bpm-input" min="20" max="300" placeholder="BPM" title="Type a BPM or use TAP" />
         <button class="icon-btn" id="tap-btn" title="Tap Tempo">TAP</button>
         <button class="pill teal" id="loop-mode-btn" title="Hold a pad to record a loop, tap to pause/play">LOOP</button>
       </div>
