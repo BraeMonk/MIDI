@@ -67,9 +67,12 @@
     conn.on('data', (raw) => {
       try {
         const msg = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        window._p2pReceiving = true;
         receiveHandler(msg);
       } catch (e) {
         console.warn('[relay-peer] bad message', raw);
+      } finally {
+        window._p2pReceiving = false;
       }
     });
 
