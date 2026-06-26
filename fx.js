@@ -1060,3 +1060,35 @@ function initFX() {
 }
 
 initFX();
+
+// ── Expose FX state for relay-peer.js AI bots ──────────────────
+// fxState.pedals is the live map of { active, params } per pedal ID.
+// relay-peer reads this to modulate bot intensity based on your FX chain.
+window.fxState = fxState;
+
+// Also create a post-chain analyser tap that AI0008 (pitch-tracking lead
+// bot) can read. We create it lazily once chainInput exists, so it always
+// taps the signal AFTER your guitar input hits the FX chain — same signal
+// the octaver's own pitch tracker uses, just exposed on window.
+(function mountRelayAnalyser() {
+  function tryMount() {
+    if (!fxState.chainInput) return; // chain not wired yet — retry shortly
+    if (window._relayAnalyser) return; // already mounted
+
+    const ctx = getAudio ? getAudio() : (window.state && window.state.amp && window.state.amp.ctx);
+    if (!ctx) return;
+
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0;
+    fxState.chainInput.connect(analyser); // passive tap — doesn't affect routing
+    window._relayAnalyser = analyser;
+  }
+
+  // Try immediately, then poll until chainInput exists
+  tryMount();
+  const poll = setInterval(() => {
+    tryMount();
+    if (window._relayAnalyser) clearInterval(poll);
+  }, 500);
+})();
