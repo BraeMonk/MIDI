@@ -80,6 +80,7 @@ const state = {
   ],
   kitName: 'classic',
   bpm: 120,
+  bpmIsDefault: true,  // becomes false once the user taps in a real tempo
   tapTimes: [],
   clockOrigin: null,   // AudioContext time the global bar grid started
   loopLen: 0,          // shared bar length in seconds (set from BPM on first arm)
@@ -811,6 +812,13 @@ function cyclePadLoop(padIndex, padEl) {
     // Start the global clock on the first ever arm, anchored to now.
     // All subsequent pads share this same origin so they're always in phase.
     if (state.clockOrigin === null) {
+      if (state.bpmIsDefault) {
+        // Never silently quantize to a guessed 120 BPM grid — that's what
+        // made loops feel like they were "assuming the beat." Make the user
+        // tap their actual tempo first so the grid matches what they play.
+        flashTapTempoPrompt();
+        return;
+      }
       state.loopLen      = gridLoopLen();
       state.clockOrigin  = ctx.currentTime;
     }
@@ -840,6 +848,13 @@ function cyclePadLoop(padIndex, padEl) {
 
   applyPadLoopVisual(padIndex, padEl);
   ensureLoopScheduler();
+}
+
+function flashTapTempoPrompt() {
+  const btn = document.getElementById('tap-btn');
+  if (!btn) return;
+  btn.classList.add('prompt-flash');
+  setTimeout(() => btn.classList.remove('prompt-flash'), 1200);
 }
 
 function clearPadLoop(padIndex, padEl) {
@@ -954,6 +969,7 @@ function tapTempo() {
   const avg = diffs.reduce((a, b) => a + b, 0) / diffs.length;
   const bpm = Math.round(60000 / avg);
   state.bpm = bpm;
+  state.bpmIsDefault = false;
   document.getElementById('bpm-display').textContent = `${bpm} BPM`;
 }
 
