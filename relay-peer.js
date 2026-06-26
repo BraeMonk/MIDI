@@ -398,6 +398,232 @@
         if (this._heldNote !== null) { aiNoteOff(this._code, this._heldNote); this._heldNote = null; }
       },
     },
+
+    // ── More drum feels ───────────────────────────────────────────
+
+    AI0009: {
+      name: 'Drums — Half-time',
+      desc: 'Kick on 1, snare on 3 only. Big, slow, hip-hop feel.',
+      synthType: null,
+      onStep(step) {
+        const pads  = (window.state && window.state.padDefs) || [];
+        const fxMod = fxIntensityMod();
+        const find  = (exact, fb) => { const p = pads.find(d => d.name && d.name.toLowerCase() === exact.toLowerCase()); return p ? p.note : (pads[fb] ? pads[fb].note : null); };
+        const kickNote  = find('Kick',   0);
+        const snareNote = find('Snare',  1);
+        const hatNote   = find('Hi-Hat', 2);
+        const drum = (note, vel) => { if (note == null) return; receiveHandler({ type: 'drum', note, velocity: vel }); };
+        const loud = () => Math.round(108 + Math.random() * 15 + fxMod * 12);
+        const soft = () => Math.round(55  + Math.random() * 20);
+
+        // Kick: beat 1 (step 0) and a syncopated hit on step 10
+        if (step === 0)  drum(kickNote, loud());
+        if (step === 10) drum(kickNote, Math.round(90 + fxMod * 15));
+
+        // Snare: only on beat 3 (step 8) — the half-time feel
+        if (step === 8)  drum(snareNote, loud());
+
+        // Ghost snares around the snare when fx is hot
+        if (fxMod > 0.4 && step === 7  && Math.random() < 0.5) drum(snareNote, soft());
+        if (fxMod > 0.4 && step === 9  && Math.random() < 0.4) drum(snareNote, soft());
+
+        // Hi-hat: quarter notes (every 4 steps), opened up on off-beats when clean
+        if (step % 4 === 0) drum(hatNote, Math.round(72 + Math.random() * 18));
+        // Extra 8th-note hats when distortion kicks in
+        if (fxMod > 0.5 && step % 4 === 2) drum(hatNote, soft());
+      },
+    },
+
+    AI0010: {
+      name: 'Drums — Shuffle',
+      desc: 'Swung 8th-note hi-hats with a backbeat snare. Blues/rock feel.',
+      synthType: null,
+      onStep(step) {
+        const pads  = (window.state && window.state.padDefs) || [];
+        const fxMod = fxIntensityMod();
+        const find  = (exact, fb) => { const p = pads.find(d => d.name && d.name.toLowerCase() === exact.toLowerCase()); return p ? p.note : (pads[fb] ? pads[fb].note : null); };
+        const kickNote  = find('Kick',   0);
+        const snareNote = find('Snare',  1);
+        const hatNote   = find('Hi-Hat', 2);
+        const drum = (note, vel) => { if (note == null) return; receiveHandler({ type: 'drum', note, velocity: vel }); };
+        const loud = () => Math.round(105 + Math.random() * 15 + fxMod * 12);
+        const soft = () => Math.round(50  + Math.random() * 25);
+
+        // Kick: 1 and the-and-of-2 (steps 0, 6)
+        if (step === 0) drum(kickNote, loud());
+        if (step === 6) drum(kickNote, Math.round(85 + fxMod * 15));
+
+        // Snare: 2 and 4 (steps 4, 12)
+        if (step === 4 || step === 12) drum(snareNote, loud());
+
+        // Shuffle hi-hat: triplet feel approximated in 16th grid —
+        // hit on steps 0, 2, 4, 6, 8, 10, 12, 14 BUT accent the
+        // downbeats (0,4,8,12) and ghost the "and" (2,6,10,14)
+        // to create a lilt without actual time-stretching.
+        if (step % 2 === 0) {
+          const isDown = step % 4 === 0;
+          drum(hatNote, isDown ? Math.round(88 + fxMod * 15) : soft());
+        }
+        // Extra 16th fills on upbeats when dirty
+        if (fxMod > 0.5 && step % 4 === 3 && Math.random() < 0.55) drum(hatNote, soft());
+      },
+    },
+
+    AI0011: {
+      name: 'Drums — Jazz',
+      desc: 'Sparse ride pattern with light snare ghosts. Lays back on clean tone.',
+      synthType: null,
+      onStep(step) {
+        const pads  = (window.state && window.state.padDefs) || [];
+        const fxMod = fxIntensityMod();
+        const find  = (exact, fb) => { const p = pads.find(d => d.name && d.name.toLowerCase() === exact.toLowerCase()); return p ? p.note : (pads[fb] ? pads[fb].note : null); };
+        const kickNote  = find('Kick',   0);
+        const snareNote = find('Snare',  1);
+        const hatNote   = find('Hi-Hat', 2);
+        const drum = (note, vel) => { if (note == null) return; receiveHandler({ type: 'drum', note, velocity: vel }); };
+
+        // Jazz ride: quarter notes with a light "and" on 2 and 4
+        // Steps: 0(1), 4(2), 6(2+), 8(3), 12(4), 14(4+)
+        const rideSteps = new Set([0, 4, 6, 8, 12, 14]);
+        if (rideSteps.has(step)) {
+          const isAnd = step === 6 || step === 14;
+          drum(hatNote, isAnd ? Math.round(50 + Math.random() * 20) : Math.round(70 + Math.random() * 20));
+        }
+
+        // Ghost snares — very light, very random
+        if (Math.random() < 0.12 && ![0, 4, 8, 12].includes(step)) {
+          drum(snareNote, Math.round(30 + Math.random() * 25));
+        }
+
+        // Kick: just on 1, very occasionally on the-and-of-4
+        if (step === 0) drum(kickNote, Math.round(75 + Math.random() * 20));
+        if (step === 14 && Math.random() < 0.25) drum(kickNote, Math.round(60 + Math.random() * 20));
+
+        // When FX gets dirtier, add more energy — more kick and snare
+        if (fxMod > 0.4 && step === 8 && Math.random() < 0.4) drum(kickNote, Math.round(70 + fxMod * 20));
+        if (fxMod > 0.5 && step === 4 && Math.random() < 0.35) drum(snareNote, Math.round(55 + fxMod * 25));
+      },
+    },
+
+    // ── Melodic additions ─────────────────────────────────────────
+
+    AI0012: {
+      name: 'Arpeggio',
+      desc: 'Climbs and descends chord arpeggios in 16th notes. Locks to your scale.',
+      synthType: 'keys',
+      _dir: 1,   // 1 = ascending, -1 = descending
+      _pos: 0,   // position within current arp pattern
+      _pattern: null,
+
+      onBarStart(barIdx) {
+        // Rebuild the arp pattern each bar: triad of the current chord degree
+        // Alternate ascending and descending every bar for shape
+        this._dir = (barIdx % 2 === 0) ? 1 : -1;
+        this._pos = this._dir === 1 ? 0 : 5; // 6-note pattern (2 octaves of triad)
+        // [root, 3rd, 5th, root+oct, 3rd+oct, 5th+oct] scale degrees
+        this._pattern = [0, 2, 4, 7, 9, 11];
+      },
+
+      onStep(step) {
+        if (!this._pattern) return;
+        const fxMod = fxIntensityMod();
+
+        // Density: always on even steps (8th notes), add odd steps when hot
+        const fire = step % 2 === 0 || (fxMod > 0.5 && Math.random() < 0.6);
+        if (!fire) return;
+
+        aiBotNotesOff(this._code);
+
+        const degree = this._pattern[this._pos];
+        const note   = scaleNote(degree, 0);
+        const vel    = Math.round(88 + Math.random() * 20 + fxMod * 15);
+        aiNoteOn(this._code, note, vel, this.synthType);
+        setTimeout(() => aiNoteOff(this._code, note), stepDurMs() * 0.85);
+
+        // Advance position, bounce at ends
+        this._pos += this._dir;
+        if (this._pos >= this._pattern.length) { this._pos = this._pattern.length - 2; this._dir = -1; }
+        if (this._pos < 0)                     { this._pos = 1;                        this._dir =  1; }
+      },
+    },
+
+    AI0013: {
+      name: 'Rhythm Stabs',
+      desc: 'Off-beat chord stabs like a rhythm guitar. Lays back when clean.',
+      synthType: 'keys',
+      onStep(step) {
+        const fxMod = fxIntensityMod();
+
+        // Core stab positions: the "and" of 1 and "and" of 3 (steps 2, 10)
+        // Add "and" of 2 and 4 (steps 6, 14) when more energy
+        const coreStabs  = new Set([2, 10]);
+        const extraStabs = new Set([6, 14]);
+        const isCore  = coreStabs.has(step);
+        const isExtra = extraStabs.has(step) && fxMod > 0.3;
+
+        if (!isCore && !isExtra) return;
+        if (isExtra && Math.random() < 0.35) return; // extra stabs are probabilistic
+
+        // Strum a 2-note voicing (root + fifth) for a guitar-stab feel
+        const root  = scaleNote(0, 0);
+        const fifth = scaleNote(4, 0);
+        const vel   = Math.round(90 + fxMod * 25 + Math.random() * 15);
+        const dur   = stepDurMs() * (fxMod > 0.5 ? 0.4 : 0.6); // tighter when dirty
+
+        [root, fifth].forEach(note => {
+          aiNoteOn(this._code, note, vel, this.synthType);
+          setTimeout(() => aiNoteOff(this._code, note), dur);
+        });
+      },
+    },
+
+    // ── Call & response ───────────────────────────────────────────
+
+    AI0014: {
+      name: 'Call & Response',
+      desc: 'Listens to your phrase, then echoes it back transposed up a third.',
+      synthType: 'lead',
+
+      // Per-instance state
+      _listenBar:  true,   // true = recording your phrase, false = playing it back
+      _phrase:     [],     // { stepOffset, note, velocity, durSteps } captured this bar
+      _replyPhrase: [],    // transposed version to play back
+
+      onBarStart(barIdx) {
+        if (this._listenBar) {
+          // We just finished listening — build the reply (transpose up a third = +4 semitones,
+          // then snap to scale so it stays musical)
+          this._replyPhrase = this._phrase.map(h => ({
+            ...h,
+            note: snapToScale(h.note + 4),
+          }));
+          this._phrase = [];
+        }
+        // Alternate: listen one bar, respond the next
+        this._listenBar = !this._listenBar;
+      },
+
+      onStep(step) {
+        if (this._listenBar) {
+          // Capture what the human played this step from aiHumanBuf
+          // (aiHumanBuf accumulates hits in real time during the bar)
+          aiHumanBuf
+            .filter(h => h.step === step)
+            .forEach(h => {
+              this._phrase.push({ stepOffset: step, note: h.note, velocity: h.velocity, durSteps: 1.5 });
+            });
+        } else {
+          // Play back the reply phrase — trigger notes whose stepOffset matches this step
+          this._replyPhrase
+            .filter(h => h.stepOffset === step)
+            .forEach(h => {
+              const vel = Math.round(h.velocity * 0.85); // slightly softer than original
+              aiNoteOn(this._code, h.note, vel, this.synthType);
+              setTimeout(() => aiNoteOff(this._code, h.note), stepDurMs() * h.durSteps);
+            });
+        }
+      },
+    },
   };
 
   // ── Pitch helpers for AI0008 ──────────────────────────────────────
@@ -978,7 +1204,9 @@
         <div id="rp-ai-hint" style="display:none; font-size:9px; color:var(--text-dim, #5A5D66); line-height:1.6;">
           AI0001 Piano · AI0002 Pad · AI0003 Bass<br/>
           AI0004 Piano (I–V–vi–IV) · AI0005 Pad (ii–V–I) · AI0006 Bass (walking)<br/>
-          AI0007 Drums · AI0008 Lead (pitch-tracks you)
+          AI0007 Drums · AI0008 Lead (pitch-tracks you)<br/>
+          AI0009 Drums (half-time) · AI0010 Drums (shuffle) · AI0011 Drums (jazz)<br/>
+          AI0012 Arpeggio · AI0013 Rhythm Stabs · AI0014 Call &amp; Response
         </div>
 
         <!-- Active AI band members (band mode) -->
