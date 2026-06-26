@@ -968,9 +968,14 @@ function tapTempo() {
   if (diffs[diffs.length - 1] > 2000) { state.tapTimes = [now]; return; }
   const avg = diffs.reduce((a, b) => a + b, 0) / diffs.length;
   const bpm = Math.round(60000 / avg);
+  setBpm(bpm);
+}
+
+function setBpm(bpm) {
   state.bpm = bpm;
   state.bpmIsDefault = false;
-  document.getElementById('bpm-display').textContent = `${bpm} BPM`;
+  const input = document.getElementById('bpm-input');
+  if (input && document.activeElement !== input) input.value = bpm;
 }
 
 // ── SAMPLE RECORDER ────────────────────────────
@@ -1258,6 +1263,24 @@ function initDrumToolbar() {
   });
 
   document.getElementById('tap-btn').addEventListener('click', tapTempo);
+
+  // Typeable BPM input
+  const bpmInput = document.getElementById('bpm-input');
+  if (bpmInput) {
+    bpmInput.addEventListener('change', () => {
+      const v = Math.round(parseFloat(bpmInput.value));
+      if (!isNaN(v) && v >= 20 && v <= 300) {
+        setBpm(v);
+      } else {
+        // Restore last valid value if input is garbage
+        bpmInput.value = state.bpmIsDefault ? '' : state.bpm;
+      }
+    });
+    // Also commit on Enter key
+    bpmInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') bpmInput.blur();
+    });
+  }
 
   const loopBtn = document.getElementById('loop-mode-btn');
   if (loopBtn) {
