@@ -1199,7 +1199,7 @@
 
     /* ─── BPM INPUT ──────────────────────────────── */
     .bpm-input {
-      width: 58px;
+      width: 58px !important;
       height: 28px;
       background: var(--bg);
       border: 1px solid var(--border);
@@ -1215,6 +1215,9 @@
       -moz-appearance: textfield;
       appearance: textfield;
       transition: border-color 0.12s;
+      user-select: text;
+      -webkit-user-select: text;
+      touch-action: auto;
     }
     .bpm-input::-webkit-inner-spin-button,
     .bpm-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
