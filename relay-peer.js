@@ -4,8 +4,12 @@
 
    API (window.RelayPeer):
      .hostSession()       → generates 6-char code, waits for joiner
-     .joinSession(code)   → connects to host by code
-     .leave()             → cleanly closes the connection
+     .joinSession(code)   → connects to host by code, OR adds an AI band
+                             member if code is an AI code (AI0001 etc) —
+                             multiple AI codes can be joined at once and
+                             play together off one shared clock ("band mode")
+     .leaveBot(code)      → removes a single AI band member, leaves the rest
+     .leave()             → cleanly closes everything (peer + all AI bots)
      .broadcast(msg)      → send action to peer (called by app.js hooks)
      .onReceive(fn)       → app.js registers handler for incoming msgs
 
@@ -42,7 +46,8 @@
   let aiBarIdx      = 0;
   let aiHumanBuf    = [];     // { step, note, velocity } hits the human played this bar
   let aiPrevBarBuf  = [];     // human's pattern from the previous bar (for gap-aware comping)
-  let aiHeldNotes   = [];     // notes the bot currently has sustained, for clean noteOff
+  const activeBots   = new Map(); // code -> bot def, all driven by the same shared clock
+  const aiHeldNotes  = new Map(); // code -> [notes] currently sustained by that bot
 
   // Local copy of the scale math app.js uses internally (not exposed on window),
   // kept in sync by name with app.js's SCALES / NOTE_ROOT_MAP.
@@ -78,16 +83,23 @@
   // window.state.synthType for the duration of the startNote() call only,
   // so the bot always sounds like its instrument regardless of what synth
   // you currently have selected for your own playing.
-  function aiNoteOn(note, velocity, synthType) {
+  function aiNoteOn(code, note, velocity, synthType) {
     receiveHandler({ type: 'noteOn', note, velocity: velocity || 100, synthType });
-    aiHeldNotes.push(note);
+    if (!aiHeldNotes.has(code)) aiHeldNotes.set(code, []);
+    aiHeldNotes.get(code).push(note);
   }
-  function aiNoteOff(note) {
+  function aiNoteOff(code, note) {
     receiveHandler({ type: 'noteOff', note });
-    aiHeldNotes = aiHeldNotes.filter(n => n !== note);
+    const arr = aiHeldNotes.get(code);
+    if (arr) aiHeldNotes.set(code, arr.filter(n => n !== note));
+  }
+  function aiBotNotesOff(code) {
+    const arr = aiHeldNotes.get(code);
+    if (!arr) return;
+    arr.slice().forEach(n => aiNoteOff(code, n));
   }
   function aiAllNotesOff() {
-    aiHeldNotes.slice().forEach(aiNoteOff);
+    Array.from(aiHeldNotes.keys()).forEach(aiBotNotesOff);
   }
 
   const AI_BOTS = {
@@ -102,8 +114,8 @@
         if ([0, 4, 8, 12].includes(step) ? Math.random() < 0.5 : Math.random() < 0.22) {
           const degree = [0, 2, 4, 7][Math.floor(Math.random() * 4)];
           const note = scaleNote(degree, 0);
-          aiNoteOn(note, 95 + Math.random() * 25, this.synthType); // ~95–120
-          setTimeout(() => aiNoteOff(note), stepDurMs() * 1.5);
+          aiNoteOn(this._code, note, 95 + Math.random() * 25, this.synthType); // ~95–120
+          setTimeout(() => aiNoteOff(this._code, note), stepDurMs() * 1.5);
         }
       },
     },
@@ -114,11 +126,11 @@
       onBarStart(barIdx) {
         // New chord voicing every 2 bars; alternate root-triad and 4th-degree triad
         if (barIdx % 2 !== 0) return;
-        aiAllNotesOff();
+        aiBotNotesOff(this._code);
         const rootDegree = (Math.floor(barIdx / 2) % 2 === 0) ? 0 : 3;
         [0, 2, 4].forEach(third => {
           const note = scaleNote(rootDegree + third, -1); // sit an octave below lead register
-          aiNoteOn(note, 85, this.synthType);
+          aiNoteOn(this._code, note, 85, this.synthType);
         });
       },
       onStep() { /* sustain only changes at bar boundaries */ },
@@ -131,12 +143,12 @@
         // Classic root-on-the-downbeat, fifth-on-the-and groove, two octaves down
         if (step === 0 || step === 8) {
           const note = scaleNote(0, -2);
-          aiNoteOn(note, 115, this.synthType); // downbeat root — strong and present
-          setTimeout(() => aiNoteOff(note), stepDurMs() * 1.2);
+          aiNoteOn(this._code, note, 115, this.synthType); // downbeat root — strong and present
+          setTimeout(() => aiNoteOff(this._code, note), stepDurMs() * 1.2);
         } else if (step === 6 || step === 14) {
           const note = scaleNote(4, -2);
-          aiNoteOn(note, 90, this.synthType);  // off-beat fifth — a touch lighter
-          setTimeout(() => aiNoteOff(note), stepDurMs() * 0.8);
+          aiNoteOn(this._code, note, 90, this.synthType);  // off-beat fifth — a touch lighter
+          setTimeout(() => aiNoteOff(this._code, note), stepDurMs() * 0.8);
         }
       },
     },
@@ -158,8 +170,8 @@
           const chordRoot = this.progression[aiBarIdx % this.progression.length];
           const tone = [0, 2, 4][Math.floor(Math.random() * 3)]; // chord-tone, not random scale degree
           const note = scaleNote(chordRoot + tone, 0);
-          aiNoteOn(note, 95 + Math.random() * 25, this.synthType);
-          setTimeout(() => aiNoteOff(note), stepDurMs() * 1.5);
+          aiNoteOn(this._code, note, 95 + Math.random() * 25, this.synthType);
+          setTimeout(() => aiNoteOff(this._code, note), stepDurMs() * 1.5);
         }
       },
     },
@@ -169,11 +181,11 @@
       synthType: 'pad',
       progression: [1, 4, 0],
       onBarStart(barIdx) {
-        aiAllNotesOff();
+        aiBotNotesOff(this._code);
         const chordRoot = this.progression[barIdx % this.progression.length];
         [0, 2, 4].forEach(third => {
           const note = scaleNote(chordRoot + third, -1);
-          aiNoteOn(note, 85, this.synthType);
+          aiNoteOn(this._code, note, 85, this.synthType);
         });
       },
       onStep() { /* sustain only changes at bar boundaries */ },
@@ -187,18 +199,18 @@
         const chordRoot = this.progression[aiBarIdx % this.progression.length];
         if (step === 0 || step === 8) {
           const note = scaleNote(chordRoot, -2);
-          aiNoteOn(note, 115, this.synthType);
-          setTimeout(() => aiNoteOff(note), stepDurMs() * 1.2);
+          aiNoteOn(this._code, note, 115, this.synthType);
+          setTimeout(() => aiNoteOff(this._code, note), stepDurMs() * 1.2);
         } else if (step === 6) {
           const note = scaleNote(chordRoot + 4, -2); // fifth, mid-bar lift
-          aiNoteOn(note, 90, this.synthType);
-          setTimeout(() => aiNoteOff(note), stepDurMs() * 0.8);
+          aiNoteOn(this._code, note, 90, this.synthType);
+          setTimeout(() => aiNoteOff(this._code, note), stepDurMs() * 0.8);
         } else if (step === 14) {
           // Passing tone walking toward NEXT bar's chord root
           const nextRoot = this.progression[(aiBarIdx + 1) % this.progression.length];
           const note = scaleNote(nextRoot - 1, -2);
-          aiNoteOn(note, 95, this.synthType);
-          setTimeout(() => aiNoteOff(note), stepDurMs() * 0.8);
+          aiNoteOn(this._code, note, 95, this.synthType);
+          setTimeout(() => aiNoteOff(this._code, note), stepDurMs() * 0.8);
         }
       },
     },
@@ -208,58 +220,94 @@
     return /^AI\d{4}$/.test(code) && !!AI_BOTS[code];
   }
 
-  function startAIBot(code) {
-    const bot = AI_BOTS[code];
-    role = 'ai';
-    aiStepIdx = 0;
-    aiBarIdx = 0;
-    aiHumanBuf = [];
-    aiPrevBarBuf = [];
-    aiHeldNotes = [];
-
-    // Fake dataConn so existing UI/connected checks keep working untouched.
-    dataConn = {
-      open: true,
-      send: (raw) => {
-        // This is what broadcast() calls when YOU play something — capture
-        // it as "what the human just played" instead of sending over the wire.
-        try {
-          const msg = JSON.parse(raw);
-          if (msg.type === 'drum' || msg.type === 'noteOn') {
-            aiHumanBuf.push({ step: aiStepIdx, note: msg.note, velocity: msg.velocity });
-          }
-        } catch (e) {}
-      },
-      close: () => { stopAIBot(); },
-    };
-
-    setStatus('connected');
-    document.getElementById('rp-status-label').textContent = `Jamming with ${bot.name}`;
-    updateUI();
-    showToast(`AI partner connected: ${bot.name} — ${bot.desc}`);
-
-    if (bot.onBarStart) bot.onBarStart(aiBarIdx);
-
-    function tick() {
-      if (bot.onStep) bot.onStep(aiStepIdx);
-      aiStepIdx++;
-      if (aiStepIdx >= 16) {
-        aiStepIdx = 0;
-        aiBarIdx++;
-        aiPrevBarBuf = aiHumanBuf;
-        aiHumanBuf = [];
-        if (bot.onBarStart) bot.onBarStart(aiBarIdx);
-      }
-      aiTimer = setTimeout(tick, stepDurMs());
+  // Shared clock tick — drives every active bot in lockstep so they can
+  // never drift relative to each other, no matter when each was added.
+  function aiTick() {
+    activeBots.forEach((bot) => { if (bot.onStep) bot.onStep.call(bot, aiStepIdx); });
+    aiStepIdx++;
+    if (aiStepIdx >= 16) {
+      aiStepIdx = 0;
+      aiBarIdx++;
+      aiPrevBarBuf = aiHumanBuf;
+      aiHumanBuf = [];
+      activeBots.forEach((bot) => { if (bot.onBarStart) bot.onBarStart.call(bot, aiBarIdx); });
     }
-    tick();
+    aiTimer = setTimeout(aiTick, stepDurMs());
   }
 
-  function stopAIBot() {
+  function addAIBot(code) {
+    if (activeBots.has(code)) { showToast(AI_BOTS[code].name + ' is already in the jam'); return; }
+
+    const startingFresh = activeBots.size === 0;
+    const bot = Object.assign({ _code: code }, AI_BOTS[code]); // per-instance copy, tagged with its own code
+    activeBots.set(code, bot);
+
+    if (startingFresh) {
+      role = 'ai';
+      aiStepIdx = 0;
+      aiBarIdx = 0;
+      aiHumanBuf = [];
+      aiPrevBarBuf = [];
+
+      // Fake dataConn so existing UI/connected checks keep working untouched.
+      dataConn = {
+        open: true,
+        send: (raw) => {
+          // This is what broadcast() calls when YOU play something — capture
+          // it as "what the human just played" instead of sending over the wire.
+          try {
+            const msg = JSON.parse(raw);
+            if (msg.type === 'drum' || msg.type === 'noteOn') {
+              aiHumanBuf.push({ step: aiStepIdx, note: msg.note, velocity: msg.velocity });
+            }
+          } catch (e) {}
+        },
+        close: () => { stopAllAIBots(); },
+      };
+
+      setStatus('connected');
+      aiTick(); // starts the shared clock
+    }
+
+    if (bot.onBarStart) bot.onBarStart.call(bot, aiBarIdx); // sound immediately, don't wait a full bar
+    refreshAIStatusLabel();
+    updateUI();
+    showToast(`${bot.name} joined the jam — ${bot.desc}`);
+  }
+
+  function removeAIBot(code) {
+    const bot = activeBots.get(code);
+    if (!bot) return;
+    aiBotNotesOff(code);
+    aiHeldNotes.delete(code);
+    activeBots.delete(code);
+
+    if (activeBots.size === 0) {
+      stopAllAIBots();
+      dataConn = null;
+      role = null;
+      setStatus('idle');
+      updateUI();
+    } else {
+      refreshAIStatusLabel();
+      updateUI();
+    }
+  }
+
+  function stopAllAIBots() {
     if (aiTimer) { clearTimeout(aiTimer); aiTimer = null; }
     aiAllNotesOff();
+    aiHeldNotes.clear();
+    activeBots.clear();
     aiHumanBuf = [];
     aiPrevBarBuf = [];
+  }
+
+  function refreshAIStatusLabel() {
+    const lb = document.getElementById('rp-status-label');
+    if (!lb) return;
+    const names = Array.from(activeBots.values()).map(b => b.name);
+    lb.textContent = names.length ? `Jamming: ${names.join(' + ')}` : 'No session';
   }
 
   // ── INTERNAL HELPERS ────────────────────────────────────────────
@@ -362,27 +410,50 @@
     const codeRow   = document.getElementById('rp-code-row');
     const joinRow   = document.getElementById('rp-join-row');
     const aiHint    = document.getElementById('rp-ai-hint');
+    const botList   = document.getElementById('rp-bot-list');
     const leaveBtn  = document.getElementById('rp-leave-btn');
     const hostBtn   = document.getElementById('rp-host-btn');
     const joinBtn   = document.getElementById('rp-join-btn');
     if (!codeRow) return;
 
-    const connected = dataConn && dataConn.open;
-    const hosting   = role === 'host' && !connected;
-    const joining   = role === 'joiner' && !connected;
+    const inBand = role === 'ai';
 
     codeRow.style.display  = (role === 'host') ? 'flex' : 'none';
-    joinRow.style.display  = (!role)           ? 'flex' : 'none';
-    if (aiHint) aiHint.style.display = (!role) ? 'block' : 'none';
+    // Join row stays open in band mode so more bots can be stacked in;
+    // hidden only once a real human peer connection exists.
+    joinRow.style.display  = (!role || inBand) ? 'flex' : 'none';
+    if (aiHint) aiHint.style.display = (!role || inBand) ? 'block' : 'none';
     leaveBtn.style.display = (role)            ? 'inline-flex' : 'none';
     hostBtn.style.display  = (!role)           ? 'inline-flex' : 'none';
-    joinBtn.style.display  = (!role)           ? 'inline-flex' : 'none';
+    joinBtn.style.display  = (!role || inBand) ? 'inline-flex' : 'none';
+
+    if (botList) {
+      if (!inBand || activeBots.size === 0) {
+        botList.style.display = 'none';
+        botList.innerHTML = '';
+      } else {
+        botList.style.display = 'flex';
+        botList.innerHTML = Array.from(activeBots.entries()).map(([code, bot]) => `
+          <span class="rp-bot-chip">
+            <span class="rp-bot-chip-name">${bot.name}</span>
+            <button class="rp-bot-chip-x" data-code="${code}" title="Remove">✕</button>
+          </span>
+        `).join('');
+        botList.querySelectorAll('.rp-bot-chip-x').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            RelayPeer.leaveBot(btn.dataset.code);
+          });
+        });
+      }
+    }
   }
 
   // ── PUBLIC API ──────────────────────────────────────────────────
   const RelayPeer = {
 
     async hostSession() {
+      stopAllAIBots();
       await loadPeerJS();
       if (peerInstance) this.leave();
 
@@ -417,11 +488,16 @@
       code = code.toUpperCase().trim();
 
       if (isAICode(code)) {
-        if (peerInstance) this.leave();
-        startAIBot(code);
+        // Joining a bot only kicks out a REAL peer connection, never other
+        // active bots — that's the whole point of band mode.
+        if (peerInstance) { try { peerInstance.destroy(); } catch (e) {} peerInstance = null; }
+        addAIBot(code);
         return;
       }
 
+      // Joining a real peer always clears the band first — can't mix live
+      // P2P with local bots on one data channel.
+      stopAllAIBots();
       await loadPeerJS();
       if (peerInstance) this.leave();
 
@@ -448,8 +524,12 @@
       });
     },
 
+    leaveBot(code) {
+      removeAIBot(code);
+    },
+
     leave() {
-      stopAIBot();
+      stopAllAIBots();
       if (dataConn) { try { if (dataConn.close) dataConn.close(); } catch (e) {} dataConn = null; }
       if (peerInstance) { try { peerInstance.destroy(); } catch (e) {} peerInstance = null; }
       role = null;
@@ -553,7 +633,21 @@
 
       /* Join row */
       #rp-join-row { display: flex; gap: 5px; }
-      #rp-join-input {
+
+      /* Band-mode bot roster */
+      #rp-bot-list { display: flex; flex-wrap: wrap; gap: 5px; }
+      .rp-bot-chip {
+        display: inline-flex; align-items: center; gap: 5px;
+        background: var(--teal-dim, rgba(61,214,200,0.12));
+        border: 1px solid var(--teal, #3DD6C8);
+        color: var(--teal, #3DD6C8);
+        border-radius: 12px; padding: 3px 8px; font-size: 10px; font-weight: 700;
+      }
+      .rp-bot-chip-x {
+        background: none; border: none; cursor: pointer; padding: 0;
+        color: var(--teal, #3DD6C8); font-size: 10px; line-height: 1; opacity: 0.7;
+      }
+      .rp-bot-chip-x:hover { opacity: 1; }      #rp-join-input {
         flex: 1; background: var(--raised, #1D2027);
         border: 1px solid var(--border, #252830); border-radius: 4px;
         padding: 5px 8px; font-family: 'JetBrains Mono', monospace;
@@ -622,6 +716,9 @@
           AI0004 Piano (I–V–vi–IV) · AI0005 Pad (ii–V–I) · AI0006 Bass (walking)
         </div>
 
+        <!-- Active AI band members (band mode) -->
+        <div id="rp-bot-list" style="display:none;"></div>
+
         <!-- Action buttons -->
         <div id="rp-action-row">
           <button class="rp-btn host" id="rp-host-btn">⟡ Host</button>
@@ -642,9 +739,14 @@
     });
 
     document.getElementById('rp-join-btn').addEventListener('click', () => {
-      const code = document.getElementById('rp-join-input').value.trim();
-      if (code.length === 6) RelayPeer.joinSession(code);
-      else showToast('Enter a 6-character session code');
+      const input = document.getElementById('rp-join-input');
+      const code = input.value.trim();
+      if (code.length === 6) {
+        RelayPeer.joinSession(code);
+        input.value = '';
+      } else {
+        showToast('Enter a 6-character session code');
+      }
     });
 
     document.getElementById('rp-join-input').addEventListener('keydown', (e) => {
