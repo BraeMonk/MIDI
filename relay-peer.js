@@ -1042,7 +1042,10 @@
         case 'drum':
           if (typeof triggerDrum === 'function' && window.state) {
             const def = window.state.padDefs.find(d => d.note === msg.note);
-            if (def) triggerDrum(def, msg.velocity, null);
+            // triggerDrum unconditionally calls el.classList — pass a no-op stub
+            // so bot-triggered hits don't throw and nuke the audio context.
+            const elStub = { classList: { add() {}, remove() {} }, querySelector() { return null; } };
+            if (def) triggerDrum(def, msg.velocity, elStub);
           }
           break;
         case 'noteOn':
