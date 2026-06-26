@@ -228,7 +228,7 @@ function startNote(note, velocity) {
 
   sendMIDI(0x90, Math.max(0, Math.min(127, tNote)), velocity);
   updateVelDisplay(velocity);
-  if (window.RelayPeer) window.RelayPeer.broadcast({ type: 'noteOn', note, velocity });
+  if (window.RelayPeer && !window._p2pReceiving) window.RelayPeer.broadcast({ type: 'noteOn', note, velocity });
 
   // Highlight key element
   const el = state.keyEls.get(note);
@@ -250,7 +250,7 @@ function stopNote(note) {
 
   const tNote = note + state.transpose;
   sendMIDI(0x80, Math.max(0, Math.min(127, tNote)), 0);
-  if (window.RelayPeer) window.RelayPeer.broadcast({ type: 'noteOff', note });
+  if (window.RelayPeer && !window._p2pReceiving) window.RelayPeer.broadcast({ type: 'noteOff', note });
 
   const el = state.keyEls.get(note);
   if (el) el.classList.remove('active');
@@ -330,7 +330,7 @@ const KIT_PROFILES = {
 };
 
 function triggerDrum(def, velocity, el) {
-  if (window.RelayPeer) window.RelayPeer.broadcast({ type: 'drum', note: def.note, velocity });
+  if (window.RelayPeer && !window._p2pReceiving) window.RelayPeer.broadcast({ type: 'drum', note: def.note, velocity });
   // ── SAMPLE OVERRIDE ───────────────────────────
   if (def.sampleId) {
     const s = state.samples.find(smpl => smpl.id === def.sampleId);
