@@ -267,6 +267,9 @@ function initLooper() {
   document.getElementById('looper-stop-all').addEventListener('click', stopAllLayers);
   document.getElementById('looper-clear-all').addEventListener('click', clearAllLayers);
 
+  // Bounce to WAV button
+  addBounceButton();
+
   // Floating record button — works from any tab
   var floatBtn = document.getElementById('float-rec-btn');
   if (floatBtn) {
@@ -495,6 +498,112 @@ function updateLooperRecTimer() {
   const t = document.getElementById('looper-rec-timer');
   if (t) t.textContent = m + ':' + s;
 }
+
+// ── BOUNCE TO WAV ────────────────────────────────────────────────
+// Mixes all looper layers offline into a single stereo WAV and
+// triggers a download. Uses OfflineAudioContext so it's instant —
+// no re-recording, no timing drift, no waiting for playback.
+
+async function bounceLoop() {
+  const layers = state.looper.layers;
+  const loopLen = state.looper.loopLength;
+
+  if (!loopLen || layers.length === 0) {
+    looperLog('Nothing to bounce — record at least one layer first.');
+    return;
+  }
+
+  const ctx = getAudio();
+  const sr  = ctx.sampleRate;
+  const frameCount = Math.ceil(sr * loopLen);
+
+  // OfflineAudioContext renders to a buffer without playing audio
+  const offline = new OfflineAudioContext(2, frameCount, sr);
+
+  layers.forEach(layer => {
+    if (layer.muted) return; // respect mute state
+    const src  = offline.createBufferSource();
+    const gain = offline.createGain();
+    src.buffer    = layer.buffer;
+    src.loop      = true;
+    src.loopStart = 0;
+    src.loopEnd   = loopLen;
+    gain.gain.value = layer.gainNode.gain.value; // match live volume
+    src.connect(gain);
+    gain.connect(offline.destination);
+    src.start(0);
+  });
+
+  looperLog('Bouncing…');
+  const rendered = await offline.startRendering();
+  const wav = encodeWAV(rendered);
+  const blob = new Blob([wav], { type: 'audio/wav' });
+  const url  = URL.createObjectURL(blob);
+
+  const a = document.createElement('a');
+  a.href     = url;
+  a.download = 'relay-loop-' + Date.now() + '.wav';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  looperLog('Bounced ' + layers.filter(l => !l.muted).length + ' layer(s) → WAV ↓');
+}
+
+// Encode an AudioBuffer to a 16-bit stereo WAV ArrayBuffer (pure JS, no library)
+function encodeWAV(buffer) {
+  const numCh  = buffer.numberOfChannels;
+  const sr     = buffer.sampleRate;
+  const frames = buffer.length;
+  const bitsPerSample = 16;
+  const byteRate  = sr * numCh * bitsPerSample / 8;
+  const blockAlign = numCh * bitsPerSample / 8;
+  const dataBytes  = frames * blockAlign;
+  const ab = new ArrayBuffer(44 + dataBytes);
+  const view = new DataView(ab);
+
+  const str = (off, s) => { for (let i = 0; i < s.length; i++) view.setUint8(off + i, s.charCodeAt(i)); };
+  str(0,  'RIFF');
+  view.setUint32(4,  36 + dataBytes, true);
+  str(8,  'WAVE');
+  str(12, 'fmt ');
+  view.setUint32(16, 16, true);           // PCM chunk size
+  view.setUint16(20, 1,  true);           // PCM format
+  view.setUint16(22, numCh, true);
+  view.setUint32(24, sr, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitsPerSample, true);
+  str(36, 'data');
+  view.setUint32(40, dataBytes, true);
+
+  // Interleave channels and clamp to 16-bit
+  const channels = [];
+  for (let c = 0; c < numCh; c++) channels.push(buffer.getChannelData(c));
+  let off = 44;
+  for (let i = 0; i < frames; i++) {
+    for (let c = 0; c < numCh; c++) {
+      const s = Math.max(-1, Math.min(1, channels[c][i]));
+      view.setInt16(off, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+      off += 2;
+    }
+  }
+  return ab;
+}
+
+// Wire the bounce button (added to looper UI in renderLooperLayers)
+function addBounceButton() {
+  if (document.getElementById('looper-bounce-btn')) return; // already exists
+  const container = document.getElementById('looper-controls') || document.querySelector('.looper-controls');
+  if (!container) return;
+  const btn = document.createElement('button');
+  btn.id        = 'looper-bounce-btn';
+  btn.className = 'amp-btn';
+  btn.innerHTML = '⬇ Bounce to WAV';
+  btn.style.cssText = 'margin-top:8px; width:100%;';
+  btn.addEventListener('click', bounceLoop);
+  container.appendChild(btn);
+}
+
+window.bounceLoop = bounceLoop; // expose for console access too
 
 // app.js executes init() before this file loads, so window.initAmp/initLooper
 // are not set in time. Call them directly here instead.
