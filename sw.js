@@ -2,7 +2,7 @@
    RELAY — MIDI Controller PWA  ·  sw.js
    ───────────────────────────────────────────── */
 
-const CACHE = 'relay-v20';
+const CACHE = 'relay-v21';
 
 const PRECACHE = [
   './',
