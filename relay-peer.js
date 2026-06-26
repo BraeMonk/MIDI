@@ -140,6 +140,68 @@
         }
       },
     },
+
+    // ── Progression-driven variants ──
+    // Same instruments, but the chord ROOT moves through a real progression
+    // (one chord per bar) instead of sitting still. Scale degrees are
+    // relative to the user's current scale/root, so "I" always means
+    // whatever key they're actually in.
+    AI0004: {
+      name: 'Piano — I–V–vi–IV',
+      desc: 'Comps over a moving pop progression (I–V–vi–IV), one chord per bar.',
+      synthType: 'keys',
+      progression: [0, 4, 5, 3],
+      onStep(step) {
+        const humanHitThisStep = aiPrevBarBuf.some(h => h.step === step);
+        if (humanHitThisStep) return;
+        if ([0, 4, 8, 12].includes(step) ? Math.random() < 0.5 : Math.random() < 0.22) {
+          const chordRoot = this.progression[aiBarIdx % this.progression.length];
+          const tone = [0, 2, 4][Math.floor(Math.random() * 3)]; // chord-tone, not random scale degree
+          const note = scaleNote(chordRoot + tone, 0);
+          aiNoteOn(note, 95 + Math.random() * 25, this.synthType);
+          setTimeout(() => aiNoteOff(note), stepDurMs() * 1.5);
+        }
+      },
+    },
+    AI0005: {
+      name: 'Pad — ii–V–I',
+      desc: 'Sustains a jazz turnaround (ii–V–I), a new chord every bar.',
+      synthType: 'pad',
+      progression: [1, 4, 0],
+      onBarStart(barIdx) {
+        aiAllNotesOff();
+        const chordRoot = this.progression[barIdx % this.progression.length];
+        [0, 2, 4].forEach(third => {
+          const note = scaleNote(chordRoot + third, -1);
+          aiNoteOn(note, 85, this.synthType);
+        });
+      },
+      onStep() { /* sustain only changes at bar boundaries */ },
+    },
+    AI0006: {
+      name: 'Bass — I–IV–V–IV (walking)',
+      desc: 'Walks a I–IV–V–IV groove with a passing tone into each new chord.',
+      synthType: 'bass',
+      progression: [0, 3, 4, 3],
+      onStep(step) {
+        const chordRoot = this.progression[aiBarIdx % this.progression.length];
+        if (step === 0 || step === 8) {
+          const note = scaleNote(chordRoot, -2);
+          aiNoteOn(note, 115, this.synthType);
+          setTimeout(() => aiNoteOff(note), stepDurMs() * 1.2);
+        } else if (step === 6) {
+          const note = scaleNote(chordRoot + 4, -2); // fifth, mid-bar lift
+          aiNoteOn(note, 90, this.synthType);
+          setTimeout(() => aiNoteOff(note), stepDurMs() * 0.8);
+        } else if (step === 14) {
+          // Passing tone walking toward NEXT bar's chord root
+          const nextRoot = this.progression[(aiBarIdx + 1) % this.progression.length];
+          const note = scaleNote(nextRoot - 1, -2);
+          aiNoteOn(note, 95, this.synthType);
+          setTimeout(() => aiNoteOff(note), stepDurMs() * 0.8);
+        }
+      },
+    },
   };
 
   function isAICode(code) {
@@ -555,8 +617,9 @@
         <div id="rp-join-row">
           <input id="rp-join-input" maxlength="6" placeholder="Enter code" autocomplete="off" spellcheck="false" />
         </div>
-        <div id="rp-ai-hint" style="display:none; font-size:9px; color:var(--text-dim, #5A5D66); line-height:1.5;">
-          AI partners: AI0001 (Piano) · AI0002 (Pad) · AI0003 (Bass)
+        <div id="rp-ai-hint" style="display:none; font-size:9px; color:var(--text-dim, #5A5D66); line-height:1.6;">
+          AI0001 Piano · AI0002 Pad · AI0003 Bass<br/>
+          AI0004 Piano (I–V–vi–IV) · AI0005 Pad (ii–V–I) · AI0006 Bass (walking)
         </div>
 
         <!-- Action buttons -->
