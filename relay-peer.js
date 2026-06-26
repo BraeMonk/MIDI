@@ -11,7 +11,7 @@
 
    Message schema (JSON over data channel):
      { type: 'drum',   note, velocity }
-     { type: 'noteOn',  note, velocity }
+     { type: 'noteOn',  note, velocity, synthType? }  ← synthType only used by AI bots
      { type: 'noteOff', note }
      { type: 'bpm',    bpm }
      { type: 'sync',   bpm, ts }       ← host→joiner on connect
@@ -25,8 +25,180 @@
 
   let peerInstance = null;   // Peer object
   let dataConn     = null;   // DataConnection
-  let role         = null;   // 'host' | 'joiner' | null
+  let role         = null;   // 'host' | 'joiner' | 'ai' | null
   let receiveHandler = () => {};
+
+  // ── AI JAM PARTNERS ──────────────────────────────────────────────
+  // Reserved codes that never touch PeerJS — they spin up a local bot
+  // that listens to what you play (via broadcast) and answers back
+  // (via receiveHandler), using the exact same message schema as a
+  // real human peer. app.js doesn't know the difference.
+  //
+  // Each code is a specific instrument voice rather than a generic
+  // "personality" — AI0001 Piano, AI0002 Pad, AI0003 Bass — matching
+  // the synthType options app.js already exposes (keys/pad/bass/lead).
+  let aiTimer       = null;
+  let aiStepIdx     = 0;
+  let aiBarIdx      = 0;
+  let aiHumanBuf    = [];     // { step, note, velocity } hits the human played this bar
+  let aiPrevBarBuf  = [];     // human's pattern from the previous bar (for gap-aware comping)
+  let aiHeldNotes   = [];     // notes the bot currently has sustained, for clean noteOff
+
+  // Local copy of the scale math app.js uses internally (not exposed on window),
+  // kept in sync by name with app.js's SCALES / NOTE_ROOT_MAP.
+  const AI_SCALES = {
+    none:  null,
+    major: [0,2,4,5,7,9,11],
+    minor: [0,2,3,5,7,8,10],
+    penta: [0,2,4,7,9],
+    blues: [0,3,5,6,7,10],
+    dorian:[0,2,3,5,7,9,10],
+  };
+  const AI_NOTE_ROOT_MAP = { C:0,'C#':1,D:2,'D#':3,E:4,F:5,'F#':6,G:7,'G#':8,A:9,'A#':10,B:11 };
+
+  function stepDurMs() {
+    const bpm = (window.state && window.state.bpm) ? window.state.bpm : 120;
+    return (60 / bpm / 4) * 1000; // one 16th note
+  }
+
+  // degree 0 = scale root at the user's current octave; positive degrees climb the scale.
+  function scaleNote(degree, octaveOffset) {
+    const s = window.state || {};
+    const root = AI_NOTE_ROOT_MAP[s.scaleRoot] ?? 0;
+    const intervals = AI_SCALES[s.scaleType] || AI_SCALES.major; // fall back to major if scale is 'none'
+    const baseOctave = (s.octave ?? 4) + (octaveOffset || 0);
+    const baseMidi = (baseOctave + 1) * 12 + root;
+    const span = intervals.length;
+    const within = ((degree % span) + span) % span;
+    const octJump = Math.floor(degree / span);
+    return baseMidi + intervals[within] + 12 * octJump;
+  }
+
+  // Emit a note with a specific synthType. wireReceiveHandler swaps
+  // window.state.synthType for the duration of the startNote() call only,
+  // so the bot always sounds like its instrument regardless of what synth
+  // you currently have selected for your own playing.
+  function aiNoteOn(note, velocity, synthType) {
+    receiveHandler({ type: 'noteOn', note, velocity: velocity || 0.8, synthType });
+    aiHeldNotes.push(note);
+  }
+  function aiNoteOff(note) {
+    receiveHandler({ type: 'noteOff', note });
+    aiHeldNotes = aiHeldNotes.filter(n => n !== note);
+  }
+  function aiAllNotesOff() {
+    aiHeldNotes.slice().forEach(aiNoteOff);
+  }
+
+  const AI_BOTS = {
+    AI0001: {
+      name: 'Piano',
+      desc: 'Comps melodic lines from the current scale into the gaps you leave.',
+      synthType: 'keys',
+      onStep(step) {
+        const humanHitThisStep = aiPrevBarBuf.some(h => h.step === step);
+        if (humanHitThisStep) return; // don't step on what you just played
+        // Light comping: occasional single notes on weaker beats
+        if ([0, 4, 8, 12].includes(step) ? Math.random() < 0.5 : Math.random() < 0.22) {
+          const degree = [0, 2, 4, 7][Math.floor(Math.random() * 4)];
+          const note = scaleNote(degree, 0);
+          aiNoteOn(note, 0.55 + Math.random() * 0.25, this.synthType);
+          setTimeout(() => aiNoteOff(note), stepDurMs() * 1.5);
+        }
+      },
+    },
+    AI0002: {
+      name: 'Pad',
+      desc: 'Holds a sustained chord under you, changing every couple bars.',
+      synthType: 'pad',
+      onBarStart(barIdx) {
+        // New chord voicing every 2 bars; alternate root-triad and 4th-degree triad
+        if (barIdx % 2 !== 0) return;
+        aiAllNotesOff();
+        const rootDegree = (Math.floor(barIdx / 2) % 2 === 0) ? 0 : 3;
+        [0, 2, 4].forEach(third => {
+          const note = scaleNote(rootDegree + third, -1); // sit an octave below lead register
+          aiNoteOn(note, 0.4, this.synthType);
+        });
+      },
+      onStep() { /* sustain only changes at bar boundaries */ },
+    },
+    AI0003: {
+      name: 'Bass',
+      desc: 'Locks a simple root-note groove to the beat.',
+      synthType: 'bass',
+      onStep(step) {
+        // Classic root-on-the-downbeat, fifth-on-the-and groove, two octaves down
+        if (step === 0 || step === 8) {
+          const note = scaleNote(0, -2);
+          aiNoteOn(note, 0.85, this.synthType);
+          setTimeout(() => aiNoteOff(note), stepDurMs() * 1.2);
+        } else if (step === 6 || step === 14) {
+          const note = scaleNote(4, -2);
+          aiNoteOn(note, 0.6, this.synthType);
+          setTimeout(() => aiNoteOff(note), stepDurMs() * 0.8);
+        }
+      },
+    },
+  };
+
+  function isAICode(code) {
+    return /^AI\d{4}$/.test(code) && !!AI_BOTS[code];
+  }
+
+  function startAIBot(code) {
+    const bot = AI_BOTS[code];
+    role = 'ai';
+    aiStepIdx = 0;
+    aiBarIdx = 0;
+    aiHumanBuf = [];
+    aiPrevBarBuf = [];
+    aiHeldNotes = [];
+
+    // Fake dataConn so existing UI/connected checks keep working untouched.
+    dataConn = {
+      open: true,
+      send: (raw) => {
+        // This is what broadcast() calls when YOU play something — capture
+        // it as "what the human just played" instead of sending over the wire.
+        try {
+          const msg = JSON.parse(raw);
+          if (msg.type === 'drum' || msg.type === 'noteOn') {
+            aiHumanBuf.push({ step: aiStepIdx, note: msg.note, velocity: msg.velocity });
+          }
+        } catch (e) {}
+      },
+      close: () => { stopAIBot(); },
+    };
+
+    setStatus('connected');
+    document.getElementById('rp-status-label').textContent = `Jamming with ${bot.name}`;
+    updateUI();
+    showToast(`AI partner connected: ${bot.name} — ${bot.desc}`);
+
+    if (bot.onBarStart) bot.onBarStart(aiBarIdx);
+
+    function tick() {
+      if (bot.onStep) bot.onStep(aiStepIdx);
+      aiStepIdx++;
+      if (aiStepIdx >= 16) {
+        aiStepIdx = 0;
+        aiBarIdx++;
+        aiPrevBarBuf = aiHumanBuf;
+        aiHumanBuf = [];
+        if (bot.onBarStart) bot.onBarStart(aiBarIdx);
+      }
+      aiTimer = setTimeout(tick, stepDurMs());
+    }
+    tick();
+  }
+
+  function stopAIBot() {
+    if (aiTimer) { clearTimeout(aiTimer); aiTimer = null; }
+    aiAllNotesOff();
+    aiHumanBuf = [];
+    aiPrevBarBuf = [];
+  }
 
   // ── INTERNAL HELPERS ────────────────────────────────────────────
   function genCode() {
@@ -127,6 +299,7 @@
   function updateUI() {
     const codeRow   = document.getElementById('rp-code-row');
     const joinRow   = document.getElementById('rp-join-row');
+    const aiHint    = document.getElementById('rp-ai-hint');
     const leaveBtn  = document.getElementById('rp-leave-btn');
     const hostBtn   = document.getElementById('rp-host-btn');
     const joinBtn   = document.getElementById('rp-join-btn');
@@ -138,6 +311,7 @@
 
     codeRow.style.display  = (role === 'host') ? 'flex' : 'none';
     joinRow.style.display  = (!role)           ? 'flex' : 'none';
+    if (aiHint) aiHint.style.display = (!role) ? 'block' : 'none';
     leaveBtn.style.display = (role)            ? 'inline-flex' : 'none';
     hostBtn.style.display  = (!role)           ? 'inline-flex' : 'none';
     joinBtn.style.display  = (!role)           ? 'inline-flex' : 'none';
@@ -179,6 +353,13 @@
     async joinSession(code) {
       if (!code) return;
       code = code.toUpperCase().trim();
+
+      if (isAICode(code)) {
+        if (peerInstance) this.leave();
+        startAIBot(code);
+        return;
+      }
+
       await loadPeerJS();
       if (peerInstance) this.leave();
 
@@ -206,7 +387,8 @@
     },
 
     leave() {
-      if (dataConn) { try { dataConn.close(); } catch (e) {} dataConn = null; }
+      stopAIBot();
+      if (dataConn) { try { if (dataConn.close) dataConn.close(); } catch (e) {} dataConn = null; }
       if (peerInstance) { try { peerInstance.destroy(); } catch (e) {} peerInstance = null; }
       role = null;
       setStatus('idle');
@@ -373,6 +555,9 @@
         <div id="rp-join-row">
           <input id="rp-join-input" maxlength="6" placeholder="Enter code" autocomplete="off" spellcheck="false" />
         </div>
+        <div id="rp-ai-hint" style="display:none; font-size:9px; color:var(--text-dim, #5A5D66); line-height:1.5;">
+          AI partners: AI0001 (Piano) · AI0002 (Pad) · AI0003 (Bass)
+        </div>
 
         <!-- Action buttons -->
         <div id="rp-action-row">
@@ -432,7 +617,14 @@
           break;
         case 'noteOn':
           if (typeof startNote === 'function') {
-            startNote(msg.note, msg.velocity);
+            if (msg.synthType && window.state) {
+              const prevType = window.state.synthType;
+              window.state.synthType = msg.synthType;
+              startNote(msg.note, msg.velocity);
+              window.state.synthType = prevType; // restore — startNote reads synthType synchronously
+            } else {
+              startNote(msg.note, msg.velocity);
+            }
           }
           break;
         case 'noteOff':
