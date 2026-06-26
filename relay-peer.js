@@ -79,7 +79,7 @@
   // so the bot always sounds like its instrument regardless of what synth
   // you currently have selected for your own playing.
   function aiNoteOn(note, velocity, synthType) {
-    receiveHandler({ type: 'noteOn', note, velocity: velocity || 0.8, synthType });
+    receiveHandler({ type: 'noteOn', note, velocity: velocity || 100, synthType });
     aiHeldNotes.push(note);
   }
   function aiNoteOff(note) {
@@ -102,7 +102,7 @@
         if ([0, 4, 8, 12].includes(step) ? Math.random() < 0.5 : Math.random() < 0.22) {
           const degree = [0, 2, 4, 7][Math.floor(Math.random() * 4)];
           const note = scaleNote(degree, 0);
-          aiNoteOn(note, 0.55 + Math.random() * 0.25, this.synthType);
+          aiNoteOn(note, 95 + Math.random() * 25, this.synthType); // ~95–120
           setTimeout(() => aiNoteOff(note), stepDurMs() * 1.5);
         }
       },
@@ -118,7 +118,7 @@
         const rootDegree = (Math.floor(barIdx / 2) % 2 === 0) ? 0 : 3;
         [0, 2, 4].forEach(third => {
           const note = scaleNote(rootDegree + third, -1); // sit an octave below lead register
-          aiNoteOn(note, 0.4, this.synthType);
+          aiNoteOn(note, 85, this.synthType);
         });
       },
       onStep() { /* sustain only changes at bar boundaries */ },
@@ -131,11 +131,11 @@
         // Classic root-on-the-downbeat, fifth-on-the-and groove, two octaves down
         if (step === 0 || step === 8) {
           const note = scaleNote(0, -2);
-          aiNoteOn(note, 0.85, this.synthType);
+          aiNoteOn(note, 115, this.synthType); // downbeat root — strong and present
           setTimeout(() => aiNoteOff(note), stepDurMs() * 1.2);
         } else if (step === 6 || step === 14) {
           const note = scaleNote(4, -2);
-          aiNoteOn(note, 0.6, this.synthType);
+          aiNoteOn(note, 90, this.synthType);  // off-beat fifth — a touch lighter
           setTimeout(() => aiNoteOff(note), stepDurMs() * 0.8);
         }
       },
