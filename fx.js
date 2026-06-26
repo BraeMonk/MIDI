@@ -544,6 +544,8 @@ function buildOctaver(ctx, params) {
   update(params);
   return { input, output, bypass, update, _stopRAF: () => cancelAnimationFrame(trackRAF) };
 }
+
+function buildChorus(ctx, params) {
   const input   = ctx.createGain();
   const output  = ctx.createGain();
   const bypass  = makeBypass(ctx);
