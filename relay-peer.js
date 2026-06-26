@@ -110,11 +110,15 @@
       onStep(step) {
         const humanHitThisStep = aiPrevBarBuf.some(h => h.step === step);
         if (humanHitThisStep) return; // don't step on what you just played
-        // Light comping: occasional single notes on weaker beats
-        if ([0, 4, 8, 12].includes(step) ? Math.random() < 0.5 : Math.random() < 0.22) {
+        const fxMod = fxIntensityMod();
+        // FX-reactive density: distorted = more aggressive comping
+        const strongThresh = 0.5 - fxMod * 0.2;   // 0.5 → 0.3 as FX gets hotter
+        const weakThresh   = 0.22 + fxMod * 0.18;  // 0.22 → 0.40
+        if ([0, 4, 8, 12].includes(step) ? Math.random() < strongThresh : Math.random() < weakThresh) {
           const degree = [0, 2, 4, 7][Math.floor(Math.random() * 4)];
           const note = scaleNote(degree, 0);
-          aiNoteOn(this._code, note, 95 + Math.random() * 25, this.synthType); // ~95–120
+          const vel = Math.round(95 + Math.random() * 25 + fxMod * 20);
+          aiNoteOn(this._code, note, vel, this.synthType);
           setTimeout(() => aiNoteOff(this._code, note), stepDurMs() * 1.5);
         }
       },
@@ -128,9 +132,12 @@
         if (barIdx % 2 !== 0) return;
         aiBotNotesOff(this._code);
         const rootDegree = (Math.floor(barIdx / 2) % 2 === 0) ? 0 : 3;
+        const fxMod = fxIntensityMod();
+        // Lay back (softer, slower change) on clean tone; push (louder) when dirty
+        const vel = Math.round(75 + fxMod * 30);
         [0, 2, 4].forEach(third => {
           const note = scaleNote(rootDegree + third, -1); // sit an octave below lead register
-          aiNoteOn(this._code, note, 85, this.synthType);
+          aiNoteOn(this._code, note, vel, this.synthType);
         });
       },
       onStep() { /* sustain only changes at bar boundaries */ },
@@ -141,14 +148,22 @@
       synthType: 'bass',
       onStep(step) {
         // Classic root-on-the-downbeat, fifth-on-the-and groove, two octaves down
+        const fxMod = fxIntensityMod();
         if (step === 0 || step === 8) {
           const note = scaleNote(0, -2);
-          aiNoteOn(this._code, note, 115, this.synthType); // downbeat root — strong and present
+          const vel = Math.round(110 + fxMod * 15);
+          aiNoteOn(this._code, note, vel, this.synthType); // downbeat root — strong and present
           setTimeout(() => aiNoteOff(this._code, note), stepDurMs() * 1.2);
         } else if (step === 6 || step === 14) {
           const note = scaleNote(4, -2);
-          aiNoteOn(this._code, note, 90, this.synthType);  // off-beat fifth — a touch lighter
+          aiNoteOn(this._code, note, Math.round(88 + fxMod * 12), this.synthType);  // off-beat fifth
           setTimeout(() => aiNoteOff(this._code, note), stepDurMs() * 0.8);
+        }
+        // Extra passing note on step 2 when distortion is active
+        if (fxMod > 0.4 && (step === 2 || step === 10) && Math.random() < 0.4) {
+          const note = scaleNote(2, -2);
+          aiNoteOn(this._code, note, Math.round(70 + fxMod * 20), this.synthType);
+          setTimeout(() => aiNoteOff(this._code, note), stepDurMs() * 0.6);
         }
       },
     },
@@ -166,11 +181,14 @@
       onStep(step) {
         const humanHitThisStep = aiPrevBarBuf.some(h => h.step === step);
         if (humanHitThisStep) return;
-        if ([0, 4, 8, 12].includes(step) ? Math.random() < 0.5 : Math.random() < 0.22) {
+        const fxMod = fxIntensityMod();
+        const strongThresh = 0.5 - fxMod * 0.2;
+        const weakThresh   = 0.22 + fxMod * 0.18;
+        if ([0, 4, 8, 12].includes(step) ? Math.random() < strongThresh : Math.random() < weakThresh) {
           const chordRoot = this.progression[aiBarIdx % this.progression.length];
           const tone = [0, 2, 4][Math.floor(Math.random() * 3)]; // chord-tone, not random scale degree
           const note = scaleNote(chordRoot + tone, 0);
-          aiNoteOn(this._code, note, 95 + Math.random() * 25, this.synthType);
+          aiNoteOn(this._code, note, Math.round(95 + Math.random() * 25 + fxMod * 20), this.synthType);
           setTimeout(() => aiNoteOff(this._code, note), stepDurMs() * 1.5);
         }
       },
@@ -183,9 +201,11 @@
       onBarStart(barIdx) {
         aiBotNotesOff(this._code);
         const chordRoot = this.progression[barIdx % this.progression.length];
+        const fxMod = fxIntensityMod();
+        const vel = Math.round(75 + fxMod * 30);
         [0, 2, 4].forEach(third => {
           const note = scaleNote(chordRoot + third, -1);
-          aiNoteOn(this._code, note, 85, this.synthType);
+          aiNoteOn(this._code, note, vel, this.synthType);
         });
       },
       onStep() { /* sustain only changes at bar boundaries */ },
@@ -197,24 +217,266 @@
       progression: [0, 3, 4, 3],
       onStep(step) {
         const chordRoot = this.progression[aiBarIdx % this.progression.length];
+        const fxMod = fxIntensityMod();
         if (step === 0 || step === 8) {
           const note = scaleNote(chordRoot, -2);
-          aiNoteOn(this._code, note, 115, this.synthType);
+          aiNoteOn(this._code, note, Math.round(110 + fxMod * 15), this.synthType);
           setTimeout(() => aiNoteOff(this._code, note), stepDurMs() * 1.2);
         } else if (step === 6) {
           const note = scaleNote(chordRoot + 4, -2); // fifth, mid-bar lift
-          aiNoteOn(this._code, note, 90, this.synthType);
+          aiNoteOn(this._code, note, Math.round(88 + fxMod * 12), this.synthType);
           setTimeout(() => aiNoteOff(this._code, note), stepDurMs() * 0.8);
         } else if (step === 14) {
           // Passing tone walking toward NEXT bar's chord root
           const nextRoot = this.progression[(aiBarIdx + 1) % this.progression.length];
           const note = scaleNote(nextRoot - 1, -2);
-          aiNoteOn(this._code, note, 95, this.synthType);
+          aiNoteOn(this._code, note, Math.round(93 + fxMod * 12), this.synthType);
           setTimeout(() => aiNoteOff(this._code, note), stepDurMs() * 0.8);
         }
       },
     },
+    // ── Drum bot ──────────────────────────────────────────────────
+    // AI0007 reads window.state.padDefs and triggers kick/snare/hat
+    // via receiveHandler({ type:'drum', note, velocity }) — same path
+    // as a real human drum hit. Pattern is a classic 4-on-the-floor with
+    // snare on 2&4 and an 8th-note hi-hat, with FX-reactive variations.
+    AI0007: {
+      name: 'Drums',
+      desc: 'Kick/snare/hat groove that reacts to your FX pedal state.',
+      synthType: null, // drums use triggerDrum, not synthType
+      onStep(step) {
+        const pads  = (window.state && window.state.padDefs) || [];
+        const fxMod = fxIntensityMod();
+
+        // Resolve drum notes by exact padDef name (app.js: 'Kick', 'Snare', 'Hi-Hat').
+        // Falls back to index-based lookup if names differ in a custom kit.
+        const find = (exact, fallbackIdx) => {
+          const p = pads.find(d => d.name && d.name.toLowerCase() === exact.toLowerCase());
+          return p ? p.note : (pads[fallbackIdx] ? pads[fallbackIdx].note : null);
+        };
+
+        const kickNote  = find('Kick',   0);
+        const snareNote = find('Snare',  1);
+        const hatNote   = find('Hi-Hat', 2);
+
+        const loud  = () => Math.round(105 + Math.random() * 15 + fxMod * 15);
+        const soft  = () => Math.round(70  + Math.random() * 20 + fxMod * 10);
+
+        const drum = (note, vel) => {
+          if (note == null) return;
+          receiveHandler({ type: 'drum', note, velocity: vel });
+        };
+
+        // ── Kick: beats 0 & 8 (1 & 3), extra on 10 when distorted ──
+        if (step === 0 || step === 8) drum(kickNote, loud());
+        if (step === 10 && fxMod > 0.4 && Math.random() < 0.45) drum(kickNote, soft());
+
+        // ── Snare: beats 4 & 12 (2 & 4) ──
+        if (step === 4 || step === 12) drum(snareNote, loud());
+        // Ghost note on step 3 or 11 when distortion is hot
+        if ((step === 3 || step === 11) && fxMod > 0.5 && Math.random() < 0.35) drum(snareNote, Math.round(45 + Math.random() * 20));
+
+        // ── Hi-hat: every 2 steps (8th notes); open on off-beats when clean ──
+        if (step % 2 === 0) {
+          const vel = (step % 4 === 0) ? loud() : soft();
+          drum(hatNote, vel);
+        }
+        // Extra 16th hat subdivisions when in high-energy FX state
+        if (fxMod > 0.6 && step % 2 === 1 && Math.random() < 0.5) drum(hatNote, Math.round(40 + Math.random() * 20));
+      },
+    },
+
+    // ── Pitch-tracking lead bot ────────────────────────────────────
+    // AI0008 listens to the *actual audio* you're outputting through
+    // an AnalyserNode and picks up your fundamental frequency in real
+    // time (the same autoCorrelate approach the octaver already uses).
+    // It then responds with a complementary lead line — a scale-snapped
+    // interval (third or fifth) above what you're playing — so the
+    // response tracks your pitch rather than only your MIDI events.
+    AI0008: {
+      name: 'Lead (pitch)',
+      desc: 'Tracks your live pitch and answers with a third/fifth above.',
+      synthType: 'lead',
+
+      // Internal per-instance state (set fresh in addAIBot via Object.assign)
+      _analyser:   null,
+      _buf:        null,
+      _rafId:      null,
+      _lastNote:   null,
+      _cooldownMs: 0,
+      _heldNote:   null,
+
+      onStep(step) {
+        // Clock tick is used only to release stale held notes at phrase
+        // boundaries; the actual note triggering happens in _pitchLoop.
+        if (step === 0) {
+          // New phrase — clear held note so the loop will re-trigger cleanly
+          if (this._heldNote !== null) {
+            aiNoteOff(this._code, this._heldNote);
+            this._heldNote = null;
+          }
+        }
+      },
+
+      onBarStart() { /* nothing extra */ },
+
+      // Called once when the bot is first added (via addAIBot extension below)
+      _start() {
+        // fx.js mounts a passive analyser tap on window._relayAnalyser once
+        // fxState.chainInput exists. Poll briefly until it appears.
+        const tryBind = () => {
+          const analyser = window._relayAnalyser;
+          if (!analyser) return false;
+          this._analyser = analyser;
+          this._buf = new Float32Array(analyser.fftSize);
+          this._pitchLoop();
+          return true;
+        };
+
+        if (!tryBind()) {
+          let attempts = 0;
+          const poll = setInterval(() => {
+            attempts++;
+            if (tryBind() || attempts > 20 || !activeBots.has(this._code)) {
+              clearInterval(poll);
+            }
+          }, 300);
+        }
+      },
+
+      _pitchLoop() {
+        if (!activeBots.has(this._code)) return; // bot was removed
+
+        const rafCallback = () => {
+          if (!activeBots.has(this._code)) return;
+          this._rafId = requestAnimationFrame(rafCallback);
+
+          const now = performance.now();
+          if (now < this._cooldownMs) return;
+
+          this._analyser.getFloatTimeDomainData(this._buf);
+          const freq = autoCorrelateBuffer(this._buf, this._analyser.context.sampleRate);
+
+          if (freq < 50 || freq > 1500) {
+            // No pitch detected (silence or noise) — release any held note
+            if (this._heldNote !== null) {
+              aiNoteOff(this._code, this._heldNote);
+              this._heldNote = null;
+            }
+            return;
+          }
+
+          // Convert frequency → nearest MIDI note
+          const detectedMidi = Math.round(69 + 12 * Math.log2(freq / 440));
+
+          // Snap to current scale, then offset up by a third or fifth
+          const snapped = snapToScale(detectedMidi);
+          const fxMod   = fxIntensityMod();
+          // Prefer fifths when distortion is hot (power-chord flavour)
+          const interval = fxMod > 0.5 ? 7 : 4; // semitones: major third = 4, fifth = 7
+          const targetNote = snapped + interval;
+
+          if (targetNote === this._heldNote) return; // same note, keep holding
+
+          // Release previous
+          if (this._heldNote !== null) aiNoteOff(this._code, this._heldNote);
+
+          // Trigger new
+          const vel = Math.round(85 + fxMod * 30);
+          aiNoteOn(this._code, targetNote, vel, this.synthType);
+          this._heldNote = targetNote;
+
+          // Debounce: don't re-trigger for at least 80 ms
+          this._cooldownMs = now + 80;
+        };
+
+        this._rafId = requestAnimationFrame(rafCallback);
+      },
+
+      _stop() {
+        if (this._rafId) { cancelAnimationFrame(this._rafId); this._rafId = null; }
+        if (this._heldNote !== null) { aiNoteOff(this._code, this._heldNote); this._heldNote = null; }
+      },
+    },
   };
+
+  // ── Pitch helpers for AI0008 ──────────────────────────────────────
+  // Self-contained autoCorrelate so we don't depend on the octaver's
+  // internal function being globally exposed.
+  function autoCorrelateBuffer(buf, sampleRate) {
+    const SIZE = buf.length;
+    let rms = 0;
+    for (let i = 0; i < SIZE; i++) rms += buf[i] * buf[i];
+    rms = Math.sqrt(rms / SIZE);
+    if (rms < 0.008) return -1; // too quiet
+
+    let r1 = 0, r2 = SIZE - 1;
+    for (let i = 0; i < SIZE / 2; i++) if (Math.abs(buf[i]) < 0.2) { r1 = i; break; }
+    for (let i = 1; i < SIZE / 2; i++) if (Math.abs(buf[SIZE - i]) < 0.2) { r2 = SIZE - i; break; }
+    const trimmed = buf.slice(r1, r2);
+    const len = trimmed.length;
+
+    const c = new Float32Array(len);
+    for (let i = 0; i < len; i++)
+      for (let j = 0; j < len - i; j++)
+        c[i] += trimmed[j] * trimmed[j + i];
+
+    let d = 0;
+    while (d < len - 1 && c[d] > c[d + 1]) d++;
+    let maxVal = -1, maxPos = -1;
+    for (let i = d; i < len; i++) {
+      if (c[i] > maxVal) { maxVal = c[i]; maxPos = i; }
+    }
+    if (maxPos < 0) return -1;
+
+    // Parabolic interpolation for sub-sample accuracy
+    const x1 = maxPos - 1, x2 = maxPos, x3 = maxPos + 1;
+    const a = (c[x1] - 2 * c[x2] + (c[x3] || 0)) / 2;
+    const b = (c[x3 || x2] - c[x1]) / 2;
+    const refined = (a !== 0) ? x2 - b / (2 * a) : x2;
+    return sampleRate / refined;
+  }
+
+  // Snap a MIDI note to the nearest note in the current scale
+  function snapToScale(midi) {
+    const s = window.state || {};
+    const root = AI_NOTE_ROOT_MAP[s.scaleRoot] ?? 0;
+    const intervals = AI_SCALES[s.scaleType] || AI_SCALES.major;
+    const octave = Math.floor(midi / 12);
+    const pc = midi % 12;
+    // Find closest interval
+    let bestDist = 12, bestPc = pc;
+    for (const iv of intervals) {
+      const candidate = (root + iv) % 12;
+      const dist = Math.min(Math.abs(pc - candidate), 12 - Math.abs(pc - candidate));
+      if (dist < bestDist) { bestDist = dist; bestPc = candidate; }
+    }
+    return octave * 12 + bestPc;
+  }
+
+  // ── FX intensity helper (shared across all bots) ─────────────────
+  // Returns 0.0 (clean) → 1.0 (max aggression) based on active pedals.
+  // Reads window.fxState.pedals — exposed by fx.js after initFX().
+  // Pedal IDs from PEDAL_DEFS: overdrive, distortion, fuzz, wah,
+  // octaver, chorus, flanger, phaser, tremolo, delay, reverb.
+  function fxIntensityMod() {
+    const pedals = window.fxState && window.fxState.pedals;
+    if (!pedals) return 0;
+
+    let score = 0;
+    if (pedals.distortion && pedals.distortion.active) score += 0.55;
+    if (pedals.overdrive  && pedals.overdrive.active)  score += 0.40;
+    if (pedals.fuzz       && pedals.fuzz.active)       score += 0.55;
+    if (pedals.octaver    && pedals.octaver.active)    score += 0.20; // adds girth
+    if (pedals.wah        && pedals.wah.active)        score += 0.10;
+    if (pedals.chorus     && pedals.chorus.active)     score += 0.10;
+    if (pedals.phaser     && pedals.phaser.active)     score += 0.10;
+    if (pedals.flanger    && pedals.flanger.active)    score += 0.10;
+    if (pedals.tremolo    && pedals.tremolo.active)    score += 0.05;
+    if (pedals.reverb     && pedals.reverb.active)     score -= 0.05; // spacious = lay back
+    if (pedals.delay      && pedals.delay.active)      score -= 0.05;
+    return Math.max(0, Math.min(1, score));
+  }
 
   function isAICode(code) {
     return /^AI\d{4}$/.test(code) && !!AI_BOTS[code];
@@ -270,6 +532,7 @@
     }
 
     if (bot.onBarStart) bot.onBarStart.call(bot, aiBarIdx); // sound immediately, don't wait a full bar
+    if (bot._start) bot._start();  // AI0008: kick off pitch-tracking RAF loop
     refreshAIStatusLabel();
     updateUI();
     showToast(`${bot.name} joined the jam — ${bot.desc}`);
@@ -278,6 +541,7 @@
   function removeAIBot(code) {
     const bot = activeBots.get(code);
     if (!bot) return;
+    if (bot._stop) bot._stop();   // AI0008: cancel RAF pitch loop before clearing notes
     aiBotNotesOff(code);
     aiHeldNotes.delete(code);
     activeBots.delete(code);
@@ -713,7 +977,8 @@
         </div>
         <div id="rp-ai-hint" style="display:none; font-size:9px; color:var(--text-dim, #5A5D66); line-height:1.6;">
           AI0001 Piano · AI0002 Pad · AI0003 Bass<br/>
-          AI0004 Piano (I–V–vi–IV) · AI0005 Pad (ii–V–I) · AI0006 Bass (walking)
+          AI0004 Piano (I–V–vi–IV) · AI0005 Pad (ii–V–I) · AI0006 Bass (walking)<br/>
+          AI0007 Drums · AI0008 Lead (pitch-tracks you)
         </div>
 
         <!-- Active AI band members (band mode) -->
