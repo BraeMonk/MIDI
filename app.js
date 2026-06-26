@@ -1267,16 +1267,22 @@ function initDrumToolbar() {
   // Typeable BPM input
   const bpmInput = document.getElementById('bpm-input');
   if (bpmInput) {
-    bpmInput.addEventListener('change', () => {
+    const commitBpm = () => {
       const v = Math.round(parseFloat(bpmInput.value));
       if (!isNaN(v) && v >= 20 && v <= 300) {
         setBpm(v);
+      } else if (bpmInput.value === '') {
+        // blank = reset to default state
+        state.bpmIsDefault = true;
       } else {
-        // Restore last valid value if input is garbage
         bpmInput.value = state.bpmIsDefault ? '' : state.bpm;
       }
+    };
+    bpmInput.addEventListener('change', commitBpm);
+    bpmInput.addEventListener('input', () => {
+      const v = Math.round(parseFloat(bpmInput.value));
+      if (!isNaN(v) && v >= 20 && v <= 300) setBpm(v);
     });
-    // Also commit on Enter key
     bpmInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') bpmInput.blur();
     });
