@@ -7,8 +7,6 @@
 
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
-const IDENTITY_CURVE = new Float32Array([-1, 1]);
-
 const AMP_VOICES = {
   clean:    { driveCurve: 'soft', driveMul: 0.5,  bass: 1,  mid: 0,  treble: 2,  cabFreq: 3400, preGain: 0.9 },
   crunch:   { driveCurve: 'soft', driveMul: 1.4,  bass: 2,  mid: 3,  treble: 1,  cabFreq: 2800, preGain: 1.15 },
@@ -47,13 +45,48 @@ function makeDistortionCurve(amount, type) {
   return curve;
 }
 
-function makeGateCurve(threshold) {
-  const n = 4096, curve = new Float32Array(n);
-  for (let i = 0; i < n; i++) {
-    const x = (i * 2) / n - 1, ax = Math.abs(x);
-    curve[i] = ax < threshold ? x * (ax / threshold) * (ax / threshold) : x;
+// Real noise gate: an envelope follower (RMS via AnalyserNode, sampled every
+// animation frame) driving an actual GainNode with separate attack/release
+// time constants. Unlike a static per-sample shaper curve, this tracks the
+// signal's level over TIME — fast attack to kill hiss/noise quickly when you
+// stop playing, slow release so a ringing chord or sustained note decays
+// naturally instead of getting chopped the instant it dips under threshold.
+function startGateEnvelope(ctx, tapNode, gateGainNode) {
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 1024;
+  tapNode.connect(analyser);
+  const buf = new Float32Array(analyser.fftSize);
+  let raf = null;
+  let gateOpen = true;
+
+  const THRESHOLD = 0.012; // same level the old curve used, now as an RMS gate threshold
+  const ATTACK_TAU  = 0.004; // ~4ms: snaps shut quickly on noise/hum between notes
+  const RELEASE_TAU = 0.22;  // ~220ms: lets a strum's natural decay ring out, not cut off
+
+  function tick() {
+    raf = requestAnimationFrame(tick);
+    if (!state.amp.gateOn) {
+      if (Math.abs(gateGainNode.gain.value - 1) > 0.001) {
+        gateGainNode.gain.setTargetAtTime(1, ctx.currentTime, 0.01);
+      }
+      gateOpen = true;
+      return;
+    }
+    analyser.getFloatTimeDomainData(buf);
+    let sumSq = 0;
+    for (let i = 0; i < buf.length; i++) sumSq += buf[i] * buf[i];
+    const rms = Math.sqrt(sumSq / buf.length);
+
+    if (rms > THRESHOLD) {
+      gateOpen = true;
+      gateGainNode.gain.setTargetAtTime(1, ctx.currentTime, ATTACK_TAU);
+    } else if (gateOpen) {
+      gateGainNode.gain.setTargetAtTime(0, ctx.currentTime, RELEASE_TAU);
+      if (gateGainNode.gain.value < 0.002) gateOpen = false; // fully closed, stop ramping
+    }
   }
-  return curve;
+  tick();
+  return () => { if (raf) cancelAnimationFrame(raf); };
 }
 
 // ── CABINET IR SIMULATION ─────────────────────
@@ -158,7 +191,7 @@ function loadIRFile(ctx, file, onLoaded) {
 
 function buildAmpChain(ctx) {
   const input   = ctx.createGain();
-  const gate    = ctx.createWaveShaper(); gate.curve = IDENTITY_CURVE;
+  const gate    = ctx.createGain(); gate.gain.value = 1; // controlled live by the envelope follower below
   const preGain = ctx.createGain();
   const preHP   = ctx.createBiquadFilter(); preHP.type = 'highpass'; preHP.frequency.value = 180; preHP.Q.value = 0.6;
   const shaper  = ctx.createWaveShaper(); shaper.oversample = '4x';
@@ -194,7 +227,9 @@ function buildAmpChain(ctx) {
   // Load the initial IR for the default voice
   convolver.buffer = getCabIR(ctx, 'clean');
 
-  return { input, gate, preGain, preHP, shaper, lowBlend, merge, bassF, midF, trebleF, convolver, cabGain, cabDry, outGain };
+  const stopGateEnvelope = startGateEnvelope(ctx, input, gate);
+
+  return { input, gate, preGain, preHP, shaper, lowBlend, merge, bassF, midF, trebleF, convolver, cabGain, cabDry, outGain, stopGateEnvelope };
 }
 
 function ampLog(msg, type) {
@@ -216,7 +251,10 @@ function connectDefaultInput() {
   }
 
   navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+    audio: {
+      echoCancellation: false, noiseSuppression: false, autoGainControl: false,
+      sampleRate: { ideal: 48000 }, // match the AudioContext — no resample needed
+    }
   }).then(function(stream) {
     const ctx = getAudio();
     if (state.amp.stream) state.amp.stream.getTracks().forEach(t => t.stop());
@@ -278,6 +316,7 @@ async function connectAmpInput(deviceId) {
         deviceId: deviceId ? { exact: deviceId } : undefined,
         echoCancellation: false, noiseSuppression: false, autoGainControl: false,
         channelCount: { ideal: 1 },
+        sampleRate: { ideal: 48000 }, // match the AudioContext — no resample needed
       }
     });
     state.amp.stream = stream;
@@ -315,7 +354,6 @@ function updateAmpParams() {
   const driveAmt = (state.amp.drive / 100) * preset.driveMul;
   shaper.curve = makeDistortionCurve(driveAmt, preset.driveCurve);
   preGain.gain.value = preset.preGain * clamp(0.6 + Math.sqrt(driveAmt) * 0.4, 0.6, 2.0);
-  gate.curve = state.amp.gateOn ? makeGateCurve(0.012) : IDENTITY_CURVE;
   bassF.gain.value   = clamp(state.amp.bass   + preset.bass,   -15, 15);
   midF.gain.value    = clamp(state.amp.mid    + preset.mid,    -15, 15);
   trebleF.gain.value = clamp(state.amp.treble + preset.treble, -15, 15);
