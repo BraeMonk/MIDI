@@ -1227,12 +1227,7 @@ function deleteSampleFromDB(id) {
 // ── TAB SWITCHING ──────────────────────────────
 function initTabs() {
   document.querySelectorAll('.tab').forEach(tab => {
-    // Use pointerdown so the tab switches instantly on first contact,
-    // with no 300ms delay. preventDefault() suppresses the follow-up
-    // synthetic mouse/click events the browser would otherwise emit,
-    // which is what caused tabs to fire twice on iOS.
-    tab.addEventListener('pointerdown', (e) => {
-      e.preventDefault();
+    tab.addEventListener('click', () => {
       const target = tab.dataset.tab;
       document.querySelectorAll('.tab').forEach(t  => t.classList.remove('active'));
       document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
