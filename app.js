@@ -713,9 +713,9 @@ function attachKeyEvents(el, note, isBlack) {
   el.addEventListener('touchstart',  (e) => { _lastTouch = Date.now(); onPress(e); }, { passive: true });
   el.addEventListener('touchend',    (e) => { e.preventDefault(); onRelease(e); });
   el.addEventListener('touchcancel', onRelease, { passive: true });
-  el.addEventListener('mousedown',   (e) => { if (Date.now() - _lastTouch > 500) onPress(e); });
-  el.addEventListener('mouseup',     (e) => { if (Date.now() - _lastTouch > 500) onRelease(e); });
-  el.addEventListener('mouseleave',  (e) => { if (Date.now() - _lastTouch > 500 && el.classList.contains('active')) onRelease(e); });
+  el.addEventListener('mousedown',   (e) => { if (Date.now() - _lastTouch > 600) onPress(e); });
+  el.addEventListener('mouseup',     (e) => { if (Date.now() - _lastTouch > 600) onRelease(e); });
+  el.addEventListener('mouseleave',  (e) => { if (Date.now() - _lastTouch > 600 && el.classList.contains('active')) onRelease(e); });
 }
 
 // ── DRUM GRID BUILD ────────────────────────────
@@ -760,7 +760,7 @@ function buildDrumGrid() {
     };
 
     el.addEventListener('touchstart', (e) => { _lastTouch = Date.now(); fire(e); }, { passive: true });
-    el.addEventListener('mousedown',  (e) => { if (Date.now() - _lastTouch > 500) fire(e); });
+    el.addEventListener('mousedown',  (e) => { if (Date.now() - _lastTouch > 600) fire(e); });
 
     wireLoopDot(el.querySelector('.pad-loop-dot'), i, def, el);
 
@@ -789,8 +789,8 @@ function wireLoopDot(dot, padIndex, def, padEl) {
   dot.addEventListener('touchstart', start, { passive: true });
   dot.addEventListener('touchend',   end,   { passive: true });
   dot.addEventListener('touchcancel', () => clearTimeout(timer), { passive: true });
-  dot.addEventListener('mousedown', (e) => { if (Date.now() - _lastTouch > 500) start(e); });
-  dot.addEventListener('mouseup',   (e) => { if (Date.now() - _lastTouch > 500) end(e); });
+  dot.addEventListener('mousedown', (e) => { if (Date.now() - _lastTouch > 600) start(e); });
+  dot.addEventListener('mouseup',   (e) => { if (Date.now() - _lastTouch > 600) end(e); });
 }
 
 // ── PAD LOOP SEQUENCER ─────────────────────────
@@ -1227,7 +1227,12 @@ function deleteSampleFromDB(id) {
 // ── TAB SWITCHING ──────────────────────────────
 function initTabs() {
   document.querySelectorAll('.tab').forEach(tab => {
-    tab.addEventListener('click', () => {
+    // Use pointerdown so the tab switches instantly on first contact,
+    // with no 300ms delay. preventDefault() suppresses the follow-up
+    // synthetic mouse/click events the browser would otherwise emit,
+    // which is what caused tabs to fire twice on iOS.
+    tab.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
       const target = tab.dataset.tab;
       document.querySelectorAll('.tab').forEach(t  => t.classList.remove('active'));
       document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
