@@ -426,7 +426,8 @@ function initAmp() {
     updateAmpParams();
   });
 }
-window.initAmp = initAmp;
+window.initAmp    = initAmp;
+window.onTap      = onTap;
 
 /* ============================================================
    LAYERED LOOPER
