@@ -42,7 +42,7 @@
       color: var(--text);
       font-family: 'JetBrains Mono', monospace;
       -webkit-tap-highlight-color: transparent;
-      touch-action: manipulation;
+      touch-action: pan-y;
       user-select: none;
     }
 
@@ -943,15 +943,6 @@
       font-weight: 700;
       letter-spacing: 0.15em;
       color: var(--amber-soft);
-    }
-
-    /* ─── PANEL SCROLL TOUCH FIX ────────────────── */
-    /* body has touch-action:manipulation which blocks panning.
-       Override it here so iOS Safari allows native vertical scroll. */
-    .panel-scroll {
-      touch-action: pan-y !important;
-      -webkit-overflow-scrolling: touch;
-      overscroll-behavior: contain;
     }
 
     /* ─── SCROLLBAR ──────────────────────────────── */
