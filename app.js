@@ -1470,11 +1470,7 @@ function init() {
   document.addEventListener('touchstart', onFirstGesture, { once: true });
   document.addEventListener('mousedown',  onFirstGesture, { once: true });
 
-  // iOS scroll fix
-  document.querySelectorAll('.panel-scroll').forEach(el => {
-    el.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
-    el.addEventListener('touchmove',  e => e.stopPropagation(), { passive: true });
-  });
+
 }
 
 init();
