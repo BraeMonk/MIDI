@@ -266,9 +266,7 @@ function initLooper() {
   document.getElementById('looper-play-all').addEventListener('click', playAllLayers);
   document.getElementById('looper-stop-all').addEventListener('click', stopAllLayers);
   document.getElementById('looper-clear-all').addEventListener('click', clearAllLayers);
-
-  // Bounce to WAV button
-  addBounceButton();
+  document.getElementById('looper-bounce-btn').addEventListener('click', bounceLoop);
 
   // Floating record button — works from any tab
   var floatBtn = document.getElementById('float-rec-btn');
@@ -587,20 +585,6 @@ function encodeWAV(buffer) {
     }
   }
   return ab;
-}
-
-// Wire the bounce button (added to looper UI in renderLooperLayers)
-function addBounceButton() {
-  if (document.getElementById('looper-bounce-btn')) return; // already exists
-  const container = document.getElementById('looper-controls') || document.querySelector('.looper-controls');
-  if (!container) return;
-  const btn = document.createElement('button');
-  btn.id        = 'looper-bounce-btn';
-  btn.className = 'amp-btn';
-  btn.innerHTML = '⬇ Bounce to WAV';
-  btn.style.cssText = 'margin-top:8px; width:100%;';
-  btn.addEventListener('click', bounceLoop);
-  container.appendChild(btn);
 }
 
 window.bounceLoop = bounceLoop; // expose for console access too
