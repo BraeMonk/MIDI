@@ -182,6 +182,7 @@
       background: transparent;
       white-space: nowrap;
       transition: color 0.12s, background 0.12s, border-color 0.12s;
+      touch-action: manipulation; /* eliminates 300ms delay; suppresses double-fire */
     }
     .tab:active { color: var(--text-mid); }
     .tab.active {
@@ -258,6 +259,7 @@
       cursor: pointer;
       white-space: nowrap;
       transition: color 0.1s, border-color 0.1s, background 0.1s;
+      touch-action: manipulation;
     }
     .pill:active, .pill.active {
       color: var(--amber);
@@ -287,6 +289,7 @@
       display: flex; align-items: center; justify-content: center;
       flex-shrink: 0;
       transition: color 0.1s, border-color 0.1s;
+      touch-action: manipulation;
     }
     .icon-btn:active { color: var(--amber); border-color: var(--amber); }
     .icon-btn.active { color: var(--amber); border-color: var(--amber); background: var(--amber-dim); }
@@ -572,6 +575,7 @@
       letter-spacing: 0.12em;
       text-transform: uppercase;
       cursor: pointer;
+      touch-action: manipulation;
       transition: background 0.12s;
     }
     .btn-record.recording {
@@ -639,6 +643,7 @@
       display: flex; align-items: center; justify-content: center;
       flex-shrink: 0;
       transition: color 0.1s, border-color 0.1s;
+      touch-action: manipulation;
     }
     .btn-icon:active { color: var(--amber); border-color: var(--amber); }
     .btn-icon.danger:active { color: var(--danger); border-color: var(--danger); }
@@ -1585,14 +1590,6 @@
 <script src="amp-looper.js"></script>
 <script src="fx.js"></script>
 <script src="relay-peer.js"></script>
-<script>
-window.addEventListener('DOMContentLoaded', function() {
-  document.querySelectorAll('.panel-scroll').forEach(function(el) {
-    el.style.overflow = 'hidden';
-    el.getBoundingClientRect(); // force reflow
-    el.style.overflow = '';
-  });
-});
-</script>
+
 </body>
 </html>
