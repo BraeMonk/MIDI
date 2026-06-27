@@ -945,6 +945,15 @@
       color: var(--amber-soft);
     }
 
+    /* ─── PANEL SCROLL TOUCH FIX ────────────────── */
+    /* body has touch-action:manipulation which blocks panning.
+       Override it here so iOS Safari allows native vertical scroll. */
+    .panel-scroll {
+      touch-action: pan-y !important;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+    }
+
     /* ─── SCROLLBAR ──────────────────────────────── */
     ::-webkit-scrollbar { width: 3px; height: 3px; }
     ::-webkit-scrollbar-track { background: transparent; }
