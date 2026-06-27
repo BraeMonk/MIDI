@@ -712,9 +712,9 @@ function attachKeyEvents(el, note, isBlack) {
   el.addEventListener('touchstart',  onPress,   { passive: true });
   el.addEventListener('touchend',    onRelease, { passive: true });
   el.addEventListener('touchcancel', onRelease, { passive: true });
-  el.addEventListener('mousedown',   onPress);
-  el.addEventListener('mouseup',     onRelease);
-  el.addEventListener('mouseleave',  (e) => { if (el.classList.contains('active')) onRelease(e); });
+  el.addEventListener('mousedown',   (e) => { if (e.sourceCapabilities && !e.sourceCapabilities.firesTouchEvents) onPress(e); });
+  el.addEventListener('mouseup',     (e) => { if (e.sourceCapabilities && !e.sourceCapabilities.firesTouchEvents) onRelease(e); });
+  el.addEventListener('mouseleave',  (e) => { if (e.sourceCapabilities && !e.sourceCapabilities.firesTouchEvents && el.classList.contains('active')) onRelease(e); });
 }
 
 // ── DRUM GRID BUILD ────────────────────────────
@@ -759,7 +759,7 @@ function buildDrumGrid() {
     };
 
     el.addEventListener('touchstart', fire, { passive: true });
-    el.addEventListener('mousedown',  fire);
+    el.addEventListener('mousedown',  (e) => { if (e.sourceCapabilities && !e.sourceCapabilities.firesTouchEvents) fire(e); });
 
     wireLoopDot(el.querySelector('.pad-loop-dot'), i, def, el);
 
@@ -788,8 +788,8 @@ function wireLoopDot(dot, padIndex, def, padEl) {
   dot.addEventListener('touchstart', start, { passive: true });
   dot.addEventListener('touchend',   end,   { passive: true });
   dot.addEventListener('touchcancel', () => clearTimeout(timer), { passive: true });
-  dot.addEventListener('mousedown', start);
-  dot.addEventListener('mouseup',   end);
+  dot.addEventListener('mousedown', (e) => { if (e.sourceCapabilities && !e.sourceCapabilities.firesTouchEvents) start(e); });
+  dot.addEventListener('mouseup',   (e) => { if (e.sourceCapabilities && !e.sourceCapabilities.firesTouchEvents) end(e); });
 }
 
 // ── PAD LOOP SEQUENCER ─────────────────────────
