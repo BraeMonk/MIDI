@@ -8,7 +8,12 @@
 let audioCtx = null;
 function getAudio() {
   if (!audioCtx) {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    // Explicit 48kHz: most USB audio interfaces (including the Scarlett Solo)
+    // run natively at 48kHz. Letting the browser pick its own default risked
+    // a 44.1k context fighting a 48k input — that 160:147 resample ratio is
+    // one of the worst cases for audio resamplers and is a common source of
+    // grainy/aliased-sounding live input.
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
     // Master bus — every live sound source (synths, drums, amp) routes here.
     // The looper taps this bus to record performances in layers.
     state.masterGain = audioCtx.createGain();
