@@ -702,6 +702,7 @@ function attachKeyEvents(el, note, isBlack) {
   };
 
   const onRelease = (e) => {
+    if (e && e.cancelable) e.preventDefault();
     if (state.chordMode) {
       stopChord(note);
     } else {
@@ -710,11 +711,11 @@ function attachKeyEvents(el, note, isBlack) {
   };
 
   el.addEventListener('touchstart',  onPress,   { passive: true });
-  el.addEventListener('touchend',    onRelease, { passive: true });
-  el.addEventListener('touchcancel', onRelease, { passive: true });
-  el.addEventListener('mousedown',   (e) => { if (e.sourceCapabilities && !e.sourceCapabilities.firesTouchEvents) onPress(e); });
-  el.addEventListener('mouseup',     (e) => { if (e.sourceCapabilities && !e.sourceCapabilities.firesTouchEvents) onRelease(e); });
-  el.addEventListener('mouseleave',  (e) => { if (e.sourceCapabilities && !e.sourceCapabilities.firesTouchEvents && el.classList.contains('active')) onRelease(e); });
+  el.addEventListener('touchend',    onRelease, { passive: false });
+  el.addEventListener('touchcancel', onRelease, { passive: false });
+  el.addEventListener('mousedown',   onPress);
+  el.addEventListener('mouseup',     onRelease);
+  el.addEventListener('mouseleave',  (e) => { if (el.classList.contains('active')) onRelease(e); });
 }
 
 // ── DRUM GRID BUILD ────────────────────────────
@@ -759,7 +760,8 @@ function buildDrumGrid() {
     };
 
     el.addEventListener('touchstart', fire, { passive: true });
-    el.addEventListener('mousedown',  (e) => { if (e.sourceCapabilities && !e.sourceCapabilities.firesTouchEvents) fire(e); });
+    el.addEventListener('touchend', function(e) { e.preventDefault(); }, { passive: false });
+    el.addEventListener('mousedown',  fire);
 
     wireLoopDot(el.querySelector('.pad-loop-dot'), i, def, el);
 
@@ -788,8 +790,8 @@ function wireLoopDot(dot, padIndex, def, padEl) {
   dot.addEventListener('touchstart', start, { passive: true });
   dot.addEventListener('touchend',   end,   { passive: true });
   dot.addEventListener('touchcancel', () => clearTimeout(timer), { passive: true });
-  dot.addEventListener('mousedown', (e) => { if (e.sourceCapabilities && !e.sourceCapabilities.firesTouchEvents) start(e); });
-  dot.addEventListener('mouseup',   (e) => { if (e.sourceCapabilities && !e.sourceCapabilities.firesTouchEvents) end(e); });
+  dot.addEventListener('mousedown', start);
+  dot.addEventListener('mouseup',   end);
 }
 
 // ── PAD LOOP SEQUENCER ─────────────────────────
