@@ -4,7 +4,7 @@
   "description": "PWA MIDI Controller with Pi relay bridge",
   "start_url": "./index.html",
   "display": "standalone",
-  "orientation": "landscape",
+  "orientation": "any",
   "background_color": "#15161A",
   "theme_color": "#15161A",
   "icons": [
