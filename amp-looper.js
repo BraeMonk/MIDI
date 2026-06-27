@@ -20,9 +20,29 @@ const AMP_VOICES = {
 
 function makeDistortionCurve(amount, type) {
   const n = 4096, curve = new Float32Array(n), k = Math.max(0.0001, amount);
+  // DC bias shifts the operating point so positive/negative halves clip differently —
+  // this generates the even-order harmonics (2nd, 4th) that make tube distortion
+  // sound warm instead of buzzy. Hard voicing gets more bias = more asymmetry.
+  const bias = type === 'hard' ? 0.18 : 0.08;
   for (let i = 0; i < n; i++) {
     const x = (i * 2) / n - 1;
-    curve[i] = type === 'hard' ? Math.tanh(x * (1 + k * 7)) * 1.05 : Math.tanh(x * (1 + k * 3));
+    const xb = x + bias; // shift operating point
+    let y;
+    if (type === 'hard') {
+      // Asymmetric hard clip: positive rail lower than negative (like an overdriven NPN stage)
+      const driven = xb * (1 + k * 6);
+      y = driven > 0
+        ? Math.min( 0.95, Math.tanh(driven * 0.9))   // positive side clips a touch softer
+        : Math.max(-1.05, Math.tanh(driven * 1.1));   // negative side clips harder/deeper
+    } else {
+      // Asymmetric soft clip: even-order richness without harshness
+      const driven = xb * (1 + k * 3);
+      y = driven > 0
+        ? Math.tanh(driven * 0.85) / Math.tanh(1 + k * 3) * 0.95
+        : Math.tanh(driven * 1.05) / Math.tanh(1 + k * 3);
+    }
+    // Remove DC offset from the curve itself so we don't need a post filter
+    curve[i] = y - bias * 0.5;
   }
   return curve;
 }
@@ -40,7 +60,15 @@ function buildAmpChain(ctx) {
   const input   = ctx.createGain();
   const gate    = ctx.createWaveShaper(); gate.curve = IDENTITY_CURVE;
   const preGain = ctx.createGain();
+  // Pre-shaper high-pass: rolls off bass before distortion so low-end doesn't
+  // turn into mud. The parallel lowBlend path restores the clean fundamental.
+  const preHP   = ctx.createBiquadFilter(); preHP.type = 'highpass'; preHP.frequency.value = 180; preHP.Q.value = 0.6;
   const shaper  = ctx.createWaveShaper(); shaper.oversample = '4x';
+  // Parallel clean low-end blend — merges back after shaper to restore body
+  const lowSplit  = ctx.createGain();  lowSplit.gain.value = 1;
+  const lowLPF    = ctx.createBiquadFilter(); lowLPF.type = 'lowpass'; lowLPF.frequency.value = 160; lowLPF.Q.value = 0.5;
+  const lowBlend  = ctx.createGain();  lowBlend.gain.value = 0.6;
+  const merge     = ctx.createGain();
   const bassF   = ctx.createBiquadFilter(); bassF.type = 'lowshelf';  bassF.frequency.value = 120;
   const midF    = ctx.createBiquadFilter(); midF.type  = 'peaking';   midF.frequency.value  = 800; midF.Q.value = 0.8;
   const trebleF = ctx.createBiquadFilter(); trebleF.type = 'highshelf'; trebleF.frequency.value = 3000;
@@ -48,12 +76,17 @@ function buildAmpChain(ctx) {
   const cab     = ctx.createBiquadFilter(); cab.type   = 'lowpass';   cab.Q.value = 0.8;
   const outGain = ctx.createGain(); outGain.gain.value = 0;
 
-  input.connect(gate); gate.connect(preGain); preGain.connect(shaper);
-  shaper.connect(bassF); bassF.connect(midF); midF.connect(trebleF);
+  // Main driven path: input → gate → preGain → preHP → shaper → merge
+  input.connect(gate); gate.connect(preGain); preGain.connect(preHP); preHP.connect(shaper);
+  shaper.connect(merge);
+  // Parallel clean low path: input → lowSplit → lowLPF → lowBlend → merge
+  input.connect(lowSplit); lowSplit.connect(lowLPF); lowLPF.connect(lowBlend); lowBlend.connect(merge);
+  // Post-merge tone stack + cab
+  merge.connect(bassF); bassF.connect(midF); midF.connect(trebleF);
   trebleF.connect(cabHP); cabHP.connect(cab); cab.connect(outGain);
   outGain.connect(state.masterGain);
 
-  return { input, gate, preGain, shaper, bassF, midF, trebleF, cab, cabHP, outGain };
+  return { input, gate, preGain, preHP, shaper, lowBlend, merge, bassF, midF, trebleF, cab, cabHP, outGain };
 }
 
 function ampLog(msg, type) {
@@ -169,7 +202,7 @@ function setAmpPower(on) {
 function updateAmpParams() {
   if (!state.amp.nodes) return;
   const preset = AMP_VOICES[state.amp.voice] || AMP_VOICES.clean;
-  const { gate, shaper, bassF, midF, trebleF, cab, outGain, preGain } = state.amp.nodes;
+  const { gate, shaper, bassF, midF, trebleF, cab, outGain, preGain, lowBlend } = state.amp.nodes;
   const driveAmt = (state.amp.drive / 100) * preset.driveMul;
   shaper.curve = makeDistortionCurve(driveAmt, preset.driveCurve);
   preGain.gain.value = preset.preGain * clamp(0.6 + Math.sqrt(driveAmt) * 0.4, 0.6, 2.0);
@@ -180,6 +213,9 @@ function updateAmpParams() {
   cab.frequency.value = state.amp.cabOn ? preset.cabFreq : 19000;
   cab.Q.value         = state.amp.cabOn ? 0.9 : 0.3;
   outGain.gain.value  = state.amp.on ? (state.amp.volume / 100) : 0;
+  // Low blend: more drive = more low-end gets eaten by the shaper = restore more.
+  // Clean voices get a subtle blend; high-gain voices get a stronger parallel bass restore.
+  if (lowBlend) lowBlend.gain.value = 0.3 + (state.amp.drive / 100) * 0.5;
 }
 
 // iOS Safari sometimes won't fire 'click' when ancestors have user-select:none.
