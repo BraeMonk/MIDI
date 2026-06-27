@@ -899,6 +899,20 @@
     .toggle.on { background: var(--amber-dim); border-color: var(--amber); }
     .toggle.on::after { transform: translateX(16px); background: var(--amber); }
 
+    .ir-load-btn {
+      font-size: 10px;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--text-dim);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 3px 8px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: color 0.15s, border-color 0.15s;
+      margin-left: 6px;
+    }
+    .ir-load-btn:hover { color: var(--amber); border-color: var(--amber); }
+
     .ws-log {
       font-family: 'JetBrains Mono', monospace;
       font-size: 9px;
@@ -1437,7 +1451,7 @@
             </div>
             <div class="toggle on" id="amp-cab-toggle"></div>
             <input type="file" id="amp-ir-file" accept=".wav,.aif,.aiff" style="display:none">
-            <label for="amp-ir-file">Load IR</label>
+            <label for="amp-ir-file" class="ir-load-btn">Load IR</label>
           </div>
           <div class="config-row">
             <div class="config-row-label">
