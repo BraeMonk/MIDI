@@ -152,6 +152,12 @@ function loadSettings() {
   const tr  = localStorage.getItem('relay-transpose'); if (tr)  state.transpose  = parseInt(tr);
   const sl  = localStorage.getItem('relay-show-labels');
   if (sl !== null) state.showLabels = sl === 'true';
+  // Restore scale
+  const sr = localStorage.getItem('relay-scale-root'); if (sr) state.scaleRoot = sr;
+  const st = localStorage.getItem('relay-scale-type'); if (st) state.scaleType = st;
+  // Restore tempo
+  const bpm = localStorage.getItem('relay-bpm');
+  if (bpm) { state.bpm = parseInt(bpm); state.bpmIsDefault = false; }
 }
 function saveSettings() {
   localStorage.setItem('relay-channel',     state.channel);
@@ -160,6 +166,14 @@ function saveSettings() {
   localStorage.setItem('relay-transpose',   state.transpose);
   localStorage.setItem('relay-show-labels', state.showLabels);
   if (state.wsUrl) localStorage.setItem('relay-ws-url', state.wsUrl);
+  // Session persistence — scale and tempo
+  localStorage.setItem('relay-scale-root', state.scaleRoot);
+  localStorage.setItem('relay-scale-type', state.scaleType);
+  if (!state.bpmIsDefault) localStorage.setItem('relay-bpm', state.bpm);
+  // Active bots — save codes so they can be restored on next load
+  if (window.RelayPeer && window.RelayPeer.activeBotCodes) {
+    localStorage.setItem('relay-bots', JSON.stringify(window.RelayPeer.activeBotCodes()));
+  }
 }
 
 // ── VELOCITY CURVE ─────────────────────────────
@@ -992,6 +1006,7 @@ function setBpm(bpm) {
   const input = document.getElementById('bpm-input');
   if (input && document.activeElement !== input) input.value = bpm;
   if (window.RelayPeer) window.RelayPeer.broadcast({ type: 'bpm', bpm });
+  saveSettings();
 }
 
 // ── SAMPLE RECORDER ────────────────────────────
@@ -1246,12 +1261,14 @@ function initPianoToolbar() {
   document.getElementById('scale-root').addEventListener('change', (e) => {
     state.scaleRoot = e.target.value;
     buildKeyboard();
+    saveSettings();
   });
 
   // Scale type
   document.getElementById('scale-type').addEventListener('change', (e) => {
     state.scaleType = e.target.value;
     buildKeyboard();
+    saveSettings();
   });
 
   // Chord mode toggle
@@ -1402,12 +1419,51 @@ function init() {
   if (window.initAmp)    window.initAmp();
   if (window.initLooper) window.initLooper();
 
-  document.addEventListener('touchstart', () => getAudio(), { once: true });
-  document.addEventListener('mousedown',  () => getAudio(), { once: true });
+  // Sync scale/bpm UI to restored values
+  const scaleRootEl = document.getElementById('scale-root');
+  const scaleTypeEl = document.getElementById('scale-type');
+  const bpmInputEl  = document.getElementById('bpm-input');
+  if (scaleRootEl) scaleRootEl.value = state.scaleRoot;
+  if (scaleTypeEl) scaleTypeEl.value = state.scaleType;
+  if (bpmInputEl && !state.bpmIsDefault) bpmInputEl.value = state.bpm;
 
-  // iOS scroll fix: panel-scroll divs must not let touchstart/touchmove bubble
-  // up to pad/key handlers that call preventDefault(), which kills scrolling.
-  // passive:true tells iOS this touch is safe to scroll with.
+  // Auto-jam + session restore + shareable link — all need a user gesture
+  // first (browser AudioContext policy). Hook into the existing gesture
+  // listeners and fire once.
+  const onFirstGesture = () => {
+    getAudio(); // unlock audio context
+
+    // ── Shareable link: ?join=XXXXXX auto-connects as joiner ──
+    const joinCode = new URLSearchParams(window.location.search).get('join');
+    if (joinCode && window.RelayPeer) {
+      setTimeout(() => window.RelayPeer.joinSession(joinCode), 300);
+      return; // joining a real session — skip auto-jam and bot restore
+    }
+
+    // ── Restore previously active bots ──
+    const savedBots = localStorage.getItem('relay-bots');
+    let botsToLoad = [];
+    if (savedBots) {
+      try { botsToLoad = JSON.parse(savedBots); } catch (e) {}
+    }
+
+    // ── Auto-jam: default band if no saved bots and no join code ──
+    if (botsToLoad.length === 0) {
+      botsToLoad = ['AI0007', 'AI0003', 'AI0002']; // drums + bass + pad
+    }
+
+    if (window.RelayPeer) {
+      // Stagger bot starts slightly so audio context is fully ready
+      botsToLoad.forEach((code, i) => {
+        setTimeout(() => window.RelayPeer.joinSession(code), 200 + i * 150);
+      });
+    }
+  };
+
+  document.addEventListener('touchstart', onFirstGesture, { once: true });
+  document.addEventListener('mousedown',  onFirstGesture, { once: true });
+
+  // iOS scroll fix
   document.querySelectorAll('.panel-scroll').forEach(el => {
     el.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
     el.addEventListener('touchmove',  e => e.stopPropagation(), { passive: true });
