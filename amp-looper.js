@@ -172,7 +172,7 @@ function updateAmpParams() {
   const { gate, shaper, bassF, midF, trebleF, cab, outGain, preGain } = state.amp.nodes;
   const driveAmt = (state.amp.drive / 100) * preset.driveMul;
   shaper.curve = makeDistortionCurve(driveAmt, preset.driveCurve);
-  preGain.gain.value = preset.preGain * (0.6 + driveAmt * 0.5);
+  preGain.gain.value = preset.preGain * clamp(0.6 + Math.sqrt(driveAmt) * 0.4, 0.6, 2.0);
   gate.curve = state.amp.gateOn ? makeGateCurve(0.012) : IDENTITY_CURVE;
   bassF.gain.value   = clamp(state.amp.bass   + preset.bass,   -15, 15);
   midF.gain.value    = clamp(state.amp.mid    + preset.mid,    -15, 15);
