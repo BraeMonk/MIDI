@@ -198,25 +198,27 @@ function buildSynthVoice(ctx, freq, vel01, type) {
 
   switch (type) {
     case 'pad': {
+      // Sine + detuned triangle for a warm, airy pad — not muffled
       osc  = ctx.createOscillator(); osc.type  = 'sine';
       osc2 = ctx.createOscillator(); osc2.type = 'triangle';
       osc.frequency.value  = freq;
-      osc2.frequency.value = freq * 0.998;
-      filter.frequency.value = 600 + vel01 * 1200;
-      filter.Q.value = 0.8;
+      osc2.frequency.value = freq * 0.998; // slight detune for chorus width
+      filter.frequency.value = 1800 + vel01 * 2000; // much more open — not muddy
+      filter.Q.value = 0.4; // low Q, no resonant peak
       gain.gain.setValueAtTime(0, ctx.currentTime);
-      gain.gain.linearRampToValueAtTime(vel01 * 0.3, ctx.currentTime + 0.08);
+      gain.gain.linearRampToValueAtTime(vel01 * 0.22, ctx.currentTime + 0.18); // slow bloom
       break;
     }
     case 'bass': {
+      // Sawtooth root + detuned sine sub — warm and full, not buzzy
       osc  = ctx.createOscillator(); osc.type  = 'sawtooth';
-      osc2 = ctx.createOscillator(); osc2.type = 'square';
+      osc2 = ctx.createOscillator(); osc2.type = 'sine'; // sine sub instead of square
       osc.frequency.value  = freq;
-      osc2.frequency.value = freq * 2;
-      filter.frequency.value = 300 + vel01 * 800;
-      filter.Q.value = 2;
+      osc2.frequency.value = freq * 0.5; // one octave DOWN for sub warmth, not up
+      filter.frequency.value = 500 + vel01 * 1200; // tighter, punchy
+      filter.Q.value = 0.8; // low Q — no farty resonance
       gain.gain.setValueAtTime(0, ctx.currentTime);
-      gain.gain.linearRampToValueAtTime(vel01 * 0.4, ctx.currentTime + 0.01);
+      gain.gain.linearRampToValueAtTime(vel01 * 0.35, ctx.currentTime + 0.012); // fast attack
       break;
     }
     case 'keys': {
