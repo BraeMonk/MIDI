@@ -782,7 +782,7 @@
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 6px;
-      overflow: hidden;
+      overflow: clip; /* clip = visual clipping only, NOT a scroll container — iOS won't swallow scroll gestures here */
     }
     .config-group-title {
       font-size: 8px;
@@ -1010,7 +1010,7 @@
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      overflow: hidden;
+      overflow: clip; /* clip = visual only, not a scroll container */
       transition: border-color 0.15s;
     }
     .pedal.active {
@@ -1585,46 +1585,6 @@
 <script src="amp-looper.js"></script>
 <script src="fx.js"></script>
 <script src="relay-peer.js"></script>
-<script>
-window.addEventListener('DOMContentLoaded', function() {
-  document.querySelectorAll('.panel-scroll').forEach(function(el) {
-    el.style.overflow = 'hidden';
-    el.getBoundingClientRect(); // force reflow
-    el.style.overflow = '';
-  });
-});
-</script>
-
-<script>
-// ── EVENT DEBUG OVERLAY ────────────────────────
-(function() {
-  const log = [];
-  const MAX = 30;
-
-  const overlay = document.createElement('div');
-  overlay.style.cssText = [
-    'position:fixed', 'bottom:0', 'left:0', 'right:0',
-    'height:180px', 'background:rgba(0,0,0,0.88)',
-    'color:#0f0', 'font:10px/1.5 monospace',
-    'overflow-y:auto', 'z-index:99999',
-    'padding:6px 8px', 'border-top:1px solid #333',
-    'pointer-events:none'
-  ].join(';');
-  document.body.appendChild(overlay);
-
-  function record(label, e) {
-    const t = (performance.now() / 1000).toFixed(3);
-    const target = e.target ? (e.target.className || e.target.tagName) : '?';
-    log.unshift('[' + t + '] ' + label + ' → ' + target.toString().slice(0,30));
-    if (log.length > MAX) log.pop();
-    overlay.innerHTML = log.join('<br>');
-  }
-
-  ['touchstart','touchend','mousedown','mouseup','click','pointerdown','pointerup'].forEach(type => {
-    document.addEventListener(type, (e) => record(type, e), { capture: true, passive: true });
-  });
-})();
-</script>
 
 </body>
 </html>
