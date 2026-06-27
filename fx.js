@@ -351,7 +351,7 @@ function buildOverdrive(ctx, params) {
   }
 
   function update(p) {
-    preGain.gain.value  = 1 + (p.drive / 100) * 8;
+    preGain.gain.value  = 1 + Math.sqrt(p.drive / 100) * 3;
     shaper.curve        = makeCurve(p.drive);
     toneF.gain.value    = (p.tone - 50) / 50 * 10; // ±10 dB shelf
     outGain.gain.value  = (p.level / 100) * 1.5;
@@ -390,7 +390,7 @@ function buildDistortion(ctx, params) {
   }
 
   function update(p) {
-    preGain.gain.value  = 1 + (p.drive / 100) * 15;
+    preGain.gain.value  = 1 + Math.sqrt(p.drive / 100) * 5;
     shaper.curve        = makeCurve(p.drive);
     midCut.gain.value   = -8; // classic DS-1-style mid scoop
     toneF.frequency.value = 800 + (p.tone / 100) * 7200; // 800–8000 Hz
@@ -429,7 +429,7 @@ function buildFuzz(ctx, params) {
   }
 
   function update(p) {
-    preGain.gain.value    = 2 + (p.fuzz / 100) * 20;
+    preGain.gain.value    = 2 + Math.sqrt(p.fuzz / 100) * 6;
     shaper.curve          = makeCurve(p.fuzz);
     toneF.frequency.value = 500 + (p.tone / 100) * 4500; // 500–5000 Hz
     outGain.gain.value    = (p.level / 100) * 1.0;
