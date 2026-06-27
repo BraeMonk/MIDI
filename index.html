@@ -1325,7 +1325,7 @@
         <div class="toolbar-spacer"></div>
         <span style="font-size:9px;color:var(--text-dim);">Tap Y-pos = velocity</span>
       </div>
-      <div class="panel-scroll" style="overflow-y:scroll;-webkit-overflow-scrolling:touch;height:100%;display:block;">
+      <div class="panel-scroll">
         <div>
           <div class="section-head">Record</div>
           <div class="record-row" style="margin-top:10px;">
@@ -1359,7 +1359,7 @@
         <div class="toolbar-spacer"></div>
         <button class="pill teal" id="amp-power-btn" data-on="off">⏻ Off</button>
       </div>
-      <div class="panel-scroll" style="overflow-y:scroll;-webkit-overflow-scrolling:touch;height:100%;display:block;">
+      <div class="panel-scroll">
 
         <div class="config-group">
           <div class="config-group-title">Guitar Input (USB / OTG)</div>
@@ -1444,7 +1444,7 @@
         <button class="icon-btn" id="looper-clear-all">Clear</button>
         <button class="icon-btn" id="looper-bounce-btn" title="Bounce all unmuted layers to WAV">⬇ WAV</button>
       </div>
-      <div class="panel-scroll" style="overflow-y:scroll;-webkit-overflow-scrolling:touch;height:100%;display:block;">
+      <div class="panel-scroll">
         <div>
           <div class="section-head">Record Layer</div>
           <div class="record-row" style="margin-top:10px;">
@@ -1474,14 +1474,14 @@
         <div class="toolbar-spacer"></div>
         <button class="pill teal" id="fx-bypass-all">Bypass All</button>
       </div>
-      <div class="panel-scroll" style="overflow-y:scroll;-webkit-overflow-scrolling:touch;height:100%;display:block;">
+      <div class="panel-scroll">
         <div id="fx-pedal-list"></div>
       </div>
     </div>
 
     <!-- ── CONFIG PANEL ────────────────────── -->
     <div class="panel" id="config-panel">
-      <div class="panel-scroll" style="overflow-y:scroll;-webkit-overflow-scrolling:touch;height:100%;display:block;">
+      <div class="panel-scroll">
 
         <div class="config-group">
           <div class="config-group-title">Relay Connection</div>
@@ -1585,5 +1585,14 @@
 <script src="amp-looper.js"></script>
 <script src="fx.js"></script>
 <script src="relay-peer.js"></script>
+<script>
+window.addEventListener('DOMContentLoaded', function() {
+  document.querySelectorAll('.panel-scroll').forEach(function(el) {
+    el.style.overflow = 'hidden';
+    el.getBoundingClientRect(); // force reflow
+    el.style.overflow = '';
+  });
+});
+</script>
 </body>
 </html>
