@@ -1045,6 +1045,115 @@
   };
 
   // ── Pitch helpers for AI0008 ──────────────────────────────────────
+
+  // ── GUITAR ONSET DETECTOR ────────────────────────────────────────
+  // Watches window._relayAnalyser for energy spikes (note attacks) and
+  // synthesises { step, note, velocity } entries into aiHumanBuf — the
+  // same format as MIDI noteOn events. This makes the feel analyser
+  // fully responsive to raw guitar audio with no MIDI required.
+  //
+  // Algorithm:
+  //   1. RMS energy measured every animation frame
+  //   2. Onset = RMS rises above adaptive threshold AND enough time
+  //      has passed since the last onset (refractory period)
+  //   3. On onset: pitch via autoCorrelateBuffer → MIDI note
+  //               amplitude → velocity (0–127)
+  //               current aiStepIdx → step position
+  //   4. Push into aiHumanBuf (only when bots are active)
+
+  let _onsetRafId      = null;
+  let _onsetRunning    = false;
+  const ONSET_REFRACT  = 80;   // ms minimum between onsets (prevents double-triggers)
+  const ONSET_RMS_FLOOR = 0.01; // below this = silence, ignore completely
+
+  function startOnsetDetector() {
+    if (_onsetRunning) return;
+    _onsetRunning = true;
+
+    let lastOnsetTime = 0;
+    let smoothedRms   = 0;
+    let prevRms       = 0;
+    // Adaptive threshold: tracks a slow-moving average of recent RMS peaks
+    // so the detector self-calibrates to your playing level rather than
+    // needing a hardcoded sensitivity setting.
+    let slowPeakAvg   = 0.04;
+
+    const loop = () => {
+      if (!_onsetRunning) return;
+      _onsetRafId = requestAnimationFrame(loop);
+
+      const analyser = window._relayAnalyser;
+      // Only run when bots are active and analyser is mounted
+      if (!analyser || activeBots.size === 0) return;
+
+      // Read time-domain signal
+      const buf = new Float32Array(analyser.fftSize);
+      analyser.getFloatTimeDomainData(buf);
+
+      // RMS energy of this frame
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+      const rms = Math.sqrt(sum / buf.length);
+
+      // Smooth RMS slightly so single-sample spikes don't false-trigger
+      smoothedRms = rms * 0.6 + smoothedRms * 0.4;
+
+      // Update slow peak average (very slow decay — adapts over seconds)
+      if (smoothedRms > slowPeakAvg) {
+        slowPeakAvg = smoothedRms * 0.15 + slowPeakAvg * 0.85;
+      } else {
+        slowPeakAvg = slowPeakAvg * 0.998; // very slow decay
+      }
+
+      // Onset condition:
+      //   - Current RMS exceeds adaptive threshold (60% of recent peak avg)
+      //   - RMS is rising (attack, not sustain/decay)
+      //   - Above the silence floor
+      //   - Refractory period has elapsed
+      const threshold  = Math.max(ONSET_RMS_FLOOR, slowPeakAvg * 0.6);
+      const now        = performance.now();
+      const isRising   = smoothedRms > prevRms * 1.15; // 15% rise = attack
+      const isLoud     = smoothedRms > threshold;
+      const cooldownOk = (now - lastOnsetTime) > ONSET_REFRACT;
+
+      if (isLoud && isRising && cooldownOk) {
+        lastOnsetTime = now;
+
+        // Velocity from peak amplitude — map smoothedRms to 40–127
+        // Guitar rarely hits true 0dB so scale generously
+        const velocity = Math.round(Math.min(127, 40 + (smoothedRms / slowPeakAvg) * 70));
+
+        // Pitch detection (same algo as AI0008)
+        const freq = autoCorrelateBuffer(buf, analyser.context.sampleRate);
+        // Fall back to middle C if pitch unclear — still captures timing/velocity
+        const midiNote = (freq > 50 && freq < 1500)
+          ? Math.round(69 + 12 * Math.log2(freq / 440))
+          : 60;
+
+        // Push into aiHumanBuf using current step position
+        // Duplicate-step guard: don't push twice for the same step
+        // (can happen if two frames both detect onset in same step window)
+        const alreadyThisStep = aiHumanBuf.some(h => h.step === aiStepIdx && h._fromOnset);
+        if (!alreadyThisStep) {
+          aiHumanBuf.push({ step: aiStepIdx, note: midiNote, velocity, _fromOnset: true });
+        }
+      }
+
+      prevRms = smoothedRms;
+    };
+
+    _onsetRafId = requestAnimationFrame(loop);
+  }
+
+  function stopOnsetDetector() {
+    _onsetRunning = false;
+    if (_onsetRafId) { cancelAnimationFrame(_onsetRafId); _onsetRafId = null; }
+  }
+
+  // Start detector when first bot is added, stop when last bot leaves
+  // (patched into addAIBot / stopAllAIBots below)
+
+
   // Self-contained autoCorrelate so we don't depend on the octaver's
   // internal function being globally exposed.
   function autoCorrelateBuffer(buf, sampleRate) {
@@ -1236,6 +1345,7 @@
 
       setStatus('connected');
       aiTick(); // starts the shared clock
+      startOnsetDetector(); // start listening to guitar audio
     }
 
     if (bot.onBarStart) bot.onBarStart.call(bot, aiBarIdx); // sound immediately, don't wait a full bar
@@ -1267,6 +1377,7 @@
 
   function stopAllAIBots() {
     if (aiTimer) { clearTimeout(aiTimer); aiTimer = null; }
+    stopOnsetDetector(); // stop listening to guitar audio
     aiAllNotesOff();
     aiHeldNotes.clear();
     activeBots.clear();
