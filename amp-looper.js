@@ -373,17 +373,12 @@ function updateAmpParams() {
 function onTap(el, fn) {
   if (!el) return;
   let moved = false;
-  let tapped = false;
-  el.addEventListener('touchstart', function() { moved = false; tapped = false; }, { passive: true });
-  el.addEventListener('touchmove',  function() { moved = true; }, { passive: true });
+  el.addEventListener('touchstart', function() { moved = false; }, { passive: true });
+  el.addEventListener('touchmove',  function() { moved = true;  }, { passive: true });
   el.addEventListener('touchend', function(e) {
-    if (!moved) { tapped = true; fn(e); }
-  }, { passive: true });
-  // Suppress the synthetic click iOS fires after touchend to avoid double-firing
-  el.addEventListener('click', function(e) {
-    if (tapped) { tapped = false; return; }
-    fn(e);
+    if (!moved) { e.preventDefault(); fn(e); }
   });
+  el.addEventListener('click', fn);
 }
 
 function initAmp() {
@@ -478,9 +473,8 @@ function initLooper() {
   // Floating record button — works from any tab
   var floatBtn = document.getElementById('float-rec-btn');
   if (floatBtn) {
-    let floatTapped = false;
-    floatBtn.addEventListener('touchend', function() { floatTapped = true; toggleLooperRecord(); }, { passive: true });
-    floatBtn.addEventListener('click', function() { if (floatTapped) { floatTapped = false; return; } toggleLooperRecord(); });
+    floatBtn.addEventListener('touchend', function(e) { e.preventDefault(); toggleLooperRecord(); });
+    floatBtn.addEventListener('click', toggleLooperRecord);
   }
 }
 window.initLooper = initLooper;
