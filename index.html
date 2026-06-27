@@ -774,15 +774,15 @@
 
     /* ─── CONFIG PANEL ───────────────────────────── */
     #config-panel .panel-scroll {
-      position: absolute;
-      inset: 0;
-      overflow-y: scroll;
+      flex: 1;
+      overflow-y: auto;
       -webkit-overflow-scrolling: touch;
       touch-action: pan-y;
       padding: 14px;
       display: flex;
       flex-direction: column;
       gap: 14px;
+      min-height: 0;
     }
 
     .config-group {
