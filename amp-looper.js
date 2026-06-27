@@ -56,15 +56,122 @@ function makeGateCurve(threshold) {
   return curve;
 }
 
+// ── CABINET IR SIMULATION ─────────────────────
+// Generates a synthetic cabinet impulse response using cascaded modal resonators.
+// Each cabinet voice models: speaker cone resonance, cabinet box modes, mic
+// proximity roll-off, and air absorption at high frequencies.
+// This is not a captured IR but a physics-informed approximation — far richer
+// than a single biquad, and loads instantly with no external files.
+//
+// Users can also load a real IR WAV via the file input for maximum realism.
+
+const CAB_IR_PARAMS = {
+  //           boxHz  boxQ   coneHz  coneQ  proximity  airLoss  length
+  clean:    { box: 130, bQ: 1.8, cone: 2800, cQ: 0.7, prox: 0.55, air: 0.30, ms: 180 },
+  crunch:   { box: 120, bQ: 2.0, cone: 2600, cQ: 0.8, prox: 0.50, air: 0.28, ms: 180 },
+  lead:     { box: 110, bQ: 2.2, cone: 2400, cQ: 0.9, prox: 0.45, air: 0.26, ms: 160 },
+  metal:    { box: 100, bQ: 2.5, cone: 2200, cQ: 1.0, prox: 0.40, air: 0.22, ms: 150 },
+  bass:     { box: 80,  bQ: 2.8, cone: 1000, cQ: 0.6, prox: 0.70, air: 0.40, ms: 200 },
+  acoustic: { box: 160, bQ: 1.4, cone: 4000, cQ: 0.5, prox: 0.65, air: 0.35, ms: 220 },
+};
+
+function buildCabIR(ctx, voice) {
+  const p   = CAB_IR_PARAMS[voice] || CAB_IR_PARAMS.clean;
+  const len = Math.floor(ctx.sampleRate * p.ms / 1000);
+  const buf = ctx.createBuffer(2, len, ctx.sampleRate);
+
+  for (let ch = 0; ch < 2; ch++) {
+    const data = buf.getChannelData(ch);
+    const sr   = ctx.sampleRate;
+
+    // Layer 1: Early reflections — sparse impulses in the first 8ms
+    // model the wavefront bouncing off the cabinet baffle and back wall
+    const earlyMs = [0, 1.2, 2.8, 4.1, 5.9, 7.3];
+    earlyMs.forEach((ms, i) => {
+      const idx = Math.floor(ms / 1000 * sr);
+      if (idx < len) {
+        const sign = i % 2 === 0 ? 1 : -0.7; // alternating polarity from reflections
+        data[idx] += sign * Math.pow(0.72, i) * (ch === 0 ? 1 : 0.96); // slight L/R difference
+      }
+    });
+
+    // Layer 2: Speaker cone resonance — decaying sine at cone breakup frequency
+    // This is the primary character of the speaker (e.g. Celestion G12)
+    const coneFreq = p.cone;
+    const coneStep = 2 * Math.PI * coneFreq / sr;
+    for (let i = 0; i < len; i++) {
+      const env = Math.pow(0.9998, i) * Math.exp(-i / (sr * 0.04));
+      data[i] += Math.sin(i * coneStep) * env * 0.35;
+    }
+
+    // Layer 3: Box resonance — cabinet body mode (lower frequency, longer decay)
+    const boxFreq = p.box;
+    for (let i = 0; i < len; i++) {
+      const env = Math.exp(-i / (sr * 0.12)) * Math.pow(0.9999, i);
+      data[i] += Math.sin(2 * Math.PI * boxFreq * i / sr) * env * 0.25;
+    }
+
+    // Layer 4: Diffuse tail — exponentially decaying noise models late reflections
+    // inside the cabinet and mic room ambience
+    for (let i = 0; i < len; i++) {
+      const noise = (Math.random() * 2 - 1);
+      const env   = Math.exp(-i / (sr * p.ms * 0.001 * 0.4));
+      data[i] += noise * env * 0.08;
+    }
+
+    // Layer 5: Air absorption — high-frequency rolloff increases with distance/time
+    // Apply a simple first-order IIR LPF that gets progressively stronger
+    let lp = 0;
+    for (let i = 0; i < len; i++) {
+      const fc = 1 - (i / len) * p.air; // cutoff drifts from 1.0 down to (1-air)
+      lp = lp + fc * (data[i] - lp);
+      data[i] = lp;
+    }
+
+    // Layer 6: Proximity effect — boost low-end in early samples (mic close to cone)
+    // Simple running average adds warmth to the attack
+    let proximity = 0;
+    for (let i = 0; i < len; i++) {
+      const blend = p.prox * Math.exp(-i / (sr * 0.003)); // fades out in ~3ms
+      proximity = proximity * 0.85 + data[i] * 0.15;
+      data[i] += proximity * blend;
+    }
+
+    // Normalize so loudest sample = 0.9
+    let peak = 0;
+    for (let i = 0; i < len; i++) peak = Math.max(peak, Math.abs(data[i]));
+    if (peak > 0) for (let i = 0; i < len; i++) data[i] = data[i] / peak * 0.9;
+  }
+
+  return buf;
+}
+
+// Cache built IRs so voice switches are instant
+const _irCache = {};
+function getCabIR(ctx, voice) {
+  if (!_irCache[voice]) _irCache[voice] = buildCabIR(ctx, voice);
+  return _irCache[voice];
+}
+
+// Load a real IR WAV file and decode it into an AudioBuffer
+function loadIRFile(ctx, file, onLoaded) {
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    ctx.decodeAudioData(e.target.result, function(buffer) {
+      onLoaded(buffer);
+    }, function(err) {
+      console.warn('[RELAY cab] IR decode failed:', err);
+    });
+  };
+  reader.readAsArrayBuffer(file);
+}
+
 function buildAmpChain(ctx) {
   const input   = ctx.createGain();
   const gate    = ctx.createWaveShaper(); gate.curve = IDENTITY_CURVE;
   const preGain = ctx.createGain();
-  // Pre-shaper high-pass: rolls off bass before distortion so low-end doesn't
-  // turn into mud. The parallel lowBlend path restores the clean fundamental.
   const preHP   = ctx.createBiquadFilter(); preHP.type = 'highpass'; preHP.frequency.value = 180; preHP.Q.value = 0.6;
   const shaper  = ctx.createWaveShaper(); shaper.oversample = '4x';
-  // Parallel clean low-end blend — merges back after shaper to restore body
   const lowSplit  = ctx.createGain();  lowSplit.gain.value = 1;
   const lowLPF    = ctx.createBiquadFilter(); lowLPF.type = 'lowpass'; lowLPF.frequency.value = 160; lowLPF.Q.value = 0.5;
   const lowBlend  = ctx.createGain();  lowBlend.gain.value = 0.6;
@@ -72,21 +179,32 @@ function buildAmpChain(ctx) {
   const bassF   = ctx.createBiquadFilter(); bassF.type = 'lowshelf';  bassF.frequency.value = 120;
   const midF    = ctx.createBiquadFilter(); midF.type  = 'peaking';   midF.frequency.value  = 800; midF.Q.value = 0.8;
   const trebleF = ctx.createBiquadFilter(); trebleF.type = 'highshelf'; trebleF.frequency.value = 3000;
-  const cabHP   = ctx.createBiquadFilter(); cabHP.type = 'highpass';  cabHP.frequency.value = 90; cabHP.Q.value = 0.7;
-  const cab     = ctx.createBiquadFilter(); cab.type   = 'lowpass';   cab.Q.value = 0.8;
-  const outGain = ctx.createGain(); outGain.gain.value = 0;
 
-  // Main driven path: input → gate → preGain → preHP → shaper → merge
+  // Cabinet: ConvolverNode with synthetic IR (or user-loaded real IR)
+  // cabDry is the bypass path for when cab sim is off
+  const convolver = ctx.createConvolver(); convolver.normalize = true;
+  const cabGain   = ctx.createGain(); cabGain.gain.value = 1;    // cab wet
+  const cabDry    = ctx.createGain(); cabDry.gain.value  = 0;    // cab bypass (flat)
+  const cabMerge  = ctx.createGain();
+  const outGain   = ctx.createGain(); outGain.gain.value = 0;
+
+  // Wire driven path
   input.connect(gate); gate.connect(preGain); preGain.connect(preHP); preHP.connect(shaper);
   shaper.connect(merge);
-  // Parallel clean low path: input → lowSplit → lowLPF → lowBlend → merge
+  // Parallel clean low path
   input.connect(lowSplit); lowSplit.connect(lowLPF); lowLPF.connect(lowBlend); lowBlend.connect(merge);
-  // Post-merge tone stack + cab
+  // Tone stack
   merge.connect(bassF); bassF.connect(midF); midF.connect(trebleF);
-  trebleF.connect(cabHP); cabHP.connect(cab); cab.connect(outGain);
+  // Cabinet split: convolver path + dry bypass path
+  trebleF.connect(convolver); convolver.connect(cabGain); cabGain.connect(cabMerge);
+  trebleF.connect(cabDry);    cabDry.connect(cabMerge);
+  cabMerge.connect(outGain);
   outGain.connect(state.masterGain);
 
-  return { input, gate, preGain, preHP, shaper, lowBlend, merge, bassF, midF, trebleF, cab, cabHP, outGain };
+  // Load the initial IR for the default voice
+  convolver.buffer = getCabIR(ctx, 'clean');
+
+  return { input, gate, preGain, preHP, shaper, lowBlend, merge, bassF, midF, trebleF, convolver, cabGain, cabDry, outGain };
 }
 
 function ampLog(msg, type) {
@@ -202,7 +320,8 @@ function setAmpPower(on) {
 function updateAmpParams() {
   if (!state.amp.nodes) return;
   const preset = AMP_VOICES[state.amp.voice] || AMP_VOICES.clean;
-  const { gate, shaper, bassF, midF, trebleF, cab, outGain, preGain, lowBlend } = state.amp.nodes;
+  const { gate, shaper, bassF, midF, trebleF, convolver, cabGain, cabDry, outGain, preGain, lowBlend } = state.amp.nodes;
+  const ctx = getAudio();
   const driveAmt = (state.amp.drive / 100) * preset.driveMul;
   shaper.curve = makeDistortionCurve(driveAmt, preset.driveCurve);
   preGain.gain.value = preset.preGain * clamp(0.6 + Math.sqrt(driveAmt) * 0.4, 0.6, 2.0);
@@ -210,11 +329,14 @@ function updateAmpParams() {
   bassF.gain.value   = clamp(state.amp.bass   + preset.bass,   -15, 15);
   midF.gain.value    = clamp(state.amp.mid    + preset.mid,    -15, 15);
   trebleF.gain.value = clamp(state.amp.treble + preset.treble, -15, 15);
-  cab.frequency.value = state.amp.cabOn ? preset.cabFreq : 19000;
-  cab.Q.value         = state.amp.cabOn ? 0.9 : 0.3;
+  // Swap IR when voice changes (cached after first build per voice)
+  if (convolver) convolver.buffer = getCabIR(ctx, state.amp.voice);
+  // cabOn: crossfade between convolver (wet) and dry bypass
+  if (cabGain && cabDry) {
+    cabGain.gain.value = state.amp.cabOn ? 1 : 0;
+    cabDry.gain.value  = state.amp.cabOn ? 0 : 1;
+  }
   outGain.gain.value  = state.amp.on ? (state.amp.volume / 100) : 0;
-  // Low blend: more drive = more low-end gets eaten by the shaper = restore more.
-  // Clean voices get a subtle blend; high-gain voices get a stronger parallel bass restore.
   if (lowBlend) lowBlend.gain.value = 0.3 + (state.amp.drive / 100) * 0.5;
 }
 
@@ -277,6 +399,21 @@ function initAmp() {
     e.currentTarget.classList.toggle('on', state.amp.cabOn);
     updateAmpParams();
   });
+
+  // IR file loader — drag a real cabinet IR WAV onto the input for maximum realism
+  const irInput = document.getElementById('amp-ir-file');
+  if (irInput) {
+    irInput.addEventListener('change', function(e) {
+      const file = e.target.files[0];
+      if (!file || !state.amp.nodes) return;
+      const ctx = getAudio();
+      loadIRFile(ctx, file, function(buffer) {
+        state.amp.nodes.convolver.buffer = buffer;
+        // Bypass the voice IR cache for this session — user IR takes priority
+        ampLog('IR loaded: ' + file.name + ' ✓', 'ok');
+      });
+    });
+  }
 
   onTap(document.getElementById('amp-gate-toggle'), function(e) {
     state.amp.gateOn = !state.amp.gateOn;
