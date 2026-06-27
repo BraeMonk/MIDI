@@ -327,52 +327,33 @@ function buildNoiseGate(ctx, params) {
 function buildOverdrive(ctx, params) {
   const input    = ctx.createGain();
   const preGain  = ctx.createGain();
-  // Pre-drive bass rolloff: cuts low-end before saturation to prevent mud,
-  // mirrors what a real tube input cap does (think TS-808 input filter).
-  const preHP    = ctx.createBiquadFilter(); preHP.type = 'highpass'; preHP.frequency.value = 140; preHP.Q.value = 0.55;
-  const shaper   = ctx.createWaveShaper(); shaper.oversample = '4x';
-  // Parallel clean low restore — blends in unclipped bass after the shaper
-  const lowSplit = ctx.createGain(); lowSplit.gain.value = 1;
-  const lowLPF   = ctx.createBiquadFilter(); lowLPF.type = 'lowpass'; lowLPF.frequency.value = 150;
-  const lowBlend = ctx.createGain(); lowBlend.gain.value = 0.5;
-  const merge    = ctx.createGain();
+  const shaper   = ctx.createWaveShaper(); shaper.oversample = '2x';
   const toneF    = ctx.createBiquadFilter(); toneF.type = 'highshelf'; toneF.frequency.value = 1800;
   const outGain  = ctx.createGain();
   const output   = ctx.createGain();
   const bypass   = makeBypass(ctx);
 
   input.connect(preGain);
-  preGain.connect(preHP);
-  preHP.connect(shaper);
-  shaper.connect(merge);
-  // Parallel low path
-  input.connect(lowSplit); lowSplit.connect(lowLPF); lowLPF.connect(lowBlend); lowBlend.connect(merge);
-  merge.connect(toneF);
+  preGain.connect(shaper);
+  shaper.connect(toneF);
   toneF.connect(outGain);
   outGain.connect(output);
 
   function makeCurve(drive) {
     const n = 4096, curve = new Float32Array(n);
-    const k = drive * 0.10;
-    // Asymmetric soft clip with DC bias — models a single-ended tube stage.
-    // Positive half saturates more gently (like the grid), negative clips harder (plate).
-    const bias = 0.06;
+    const k = drive * 0.12; // soft saturation amount
     for (let i = 0; i < n; i++) {
-      const x  = (i * 2) / n - 1;
-      const xb = x + bias;
-      const y  = xb > 0
-        ? Math.tanh(xb * (1 + k * 0.8)) / Math.tanh(1 + k * 0.8) * 0.92
-        : Math.tanh(xb * (1 + k * 1.2)) / Math.tanh(1 + k * 1.2);
-      curve[i] = y - bias * 0.4; // subtract most of the DC shift back out
+      const x = (i * 2) / n - 1;
+      // Soft clip: tanh with gentle knee
+      curve[i] = Math.tanh(x * (1 + k)) / Math.tanh(1 + k);
     }
     return curve;
   }
 
   function update(p) {
-    preGain.gain.value  = 1 + Math.sqrt(p.drive / 100) * 3;
+    preGain.gain.value  = 1 + (p.drive / 100) * 8;
     shaper.curve        = makeCurve(p.drive);
-    lowBlend.gain.value = 0.3 + (p.drive / 100) * 0.4; // more drive = more low restore needed
-    toneF.gain.value    = (p.tone - 50) / 50 * 10;
+    toneF.gain.value    = (p.tone - 50) / 50 * 10; // ±10 dB shelf
     outGain.gain.value  = (p.level / 100) * 1.5;
   }
   update(params);
@@ -382,14 +363,7 @@ function buildOverdrive(ctx, params) {
 function buildDistortion(ctx, params) {
   const input    = ctx.createGain();
   const preGain  = ctx.createGain();
-  // Pre-drive high-pass: kills bass before hard clipping prevents low-end flab
-  const preHP    = ctx.createBiquadFilter(); preHP.type = 'highpass'; preHP.frequency.value = 200; preHP.Q.value = 0.7;
   const shaper   = ctx.createWaveShaper(); shaper.oversample = '4x';
-  // Parallel clean low blend to restore body after hard clipping
-  const lowSplit = ctx.createGain(); lowSplit.gain.value = 1;
-  const lowLPF   = ctx.createBiquadFilter(); lowLPF.type = 'lowpass'; lowLPF.frequency.value = 140;
-  const lowBlend = ctx.createGain(); lowBlend.gain.value = 0.55;
-  const merge    = ctx.createGain();
   const midCut   = ctx.createBiquadFilter(); midCut.type = 'peaking'; midCut.frequency.value = 700; midCut.Q.value = 0.8;
   const toneF    = ctx.createBiquadFilter(); toneF.type = 'lowpass';
   const outGain  = ctx.createGain();
@@ -397,40 +371,30 @@ function buildDistortion(ctx, params) {
   const bypass   = makeBypass(ctx);
 
   input.connect(preGain);
-  preGain.connect(preHP);
-  preHP.connect(shaper);
-  shaper.connect(merge);
-  // Parallel low path
-  input.connect(lowSplit); lowSplit.connect(lowLPF); lowLPF.connect(lowBlend); lowBlend.connect(merge);
-  merge.connect(midCut);
+  preGain.connect(shaper);
+  shaper.connect(midCut);
   midCut.connect(toneF);
   toneF.connect(outGain);
   outGain.connect(output);
 
   function makeCurve(drive) {
     const n = 4096, curve = new Float32Array(n);
-    const k = 1 + (drive / 100) * 18;
-    // Asymmetric hard clip with bias — models diode asymmetry in a DS-1/MXR style circuit.
-    // Positive clips at 0.92 (silicon diode drop), negative at -1.0 (harder rail).
-    const bias = 0.10;
+    const k = 1 + (drive / 100) * 20;
     for (let i = 0; i < n; i++) {
-      const x  = (i * 2) / n - 1;
-      const xb = (x + bias) * k;
-      const y  = xb > 0
-        ? Math.min( 0.92, xb * 0.9)   // positive: softer clip (diode forward voltage)
-        : Math.max(-1.00, xb * 1.05); // negative: harder clip (rail)
-      curve[i] = y - bias * k * 0.35; // compensate DC shift
+      const x = (i * 2) / n - 1;
+      // Hard clip with asymmetric edge for harmonics
+      const driven = x * k;
+      curve[i] = Math.max(-0.85, Math.min(1.0, driven));
     }
     return curve;
   }
 
   function update(p) {
-    preGain.gain.value    = 1 + Math.sqrt(p.drive / 100) * 5;
-    shaper.curve          = makeCurve(p.drive);
-    lowBlend.gain.value   = 0.4 + (p.drive / 100) * 0.35;
-    midCut.gain.value     = -8;
-    toneF.frequency.value = 800 + (p.tone / 100) * 7200;
-    outGain.gain.value    = (p.level / 100) * 1.2;
+    preGain.gain.value  = 1 + (p.drive / 100) * 15;
+    shaper.curve        = makeCurve(p.drive);
+    midCut.gain.value   = -8; // classic DS-1-style mid scoop
+    toneF.frequency.value = 800 + (p.tone / 100) * 7200; // 800–8000 Hz
+    outGain.gain.value  = (p.level / 100) * 1.2;
   }
   update(params);
   return { input, output, bypass, update };
@@ -440,9 +404,6 @@ function buildFuzz(ctx, params) {
   const input    = ctx.createGain();
   const preGain  = ctx.createGain();
   const shaper   = ctx.createWaveShaper(); shaper.oversample = '4x';
-  // Post-shaper: fuzz needs a gentle LP to tame aliasing fizz, plus a resonant
-  // mid-peak to give it that classic nasal germanium honk
-  const midPeak  = ctx.createBiquadFilter(); midPeak.type = 'peaking'; midPeak.frequency.value = 1000; midPeak.Q.value = 1.2; midPeak.gain.value = 4;
   const toneF    = ctx.createBiquadFilter(); toneF.type = 'lowpass';
   const outGain  = ctx.createGain();
   const output   = ctx.createGain();
@@ -450,40 +411,27 @@ function buildFuzz(ctx, params) {
 
   input.connect(preGain);
   preGain.connect(shaper);
-  shaper.connect(midPeak);
-  midPeak.connect(toneF);
+  shaper.connect(toneF);
   toneF.connect(outGain);
   outGain.connect(output);
 
   function makeCurve(fuzz) {
     const n = 4096, curve = new Float32Array(n);
-    const k = 0.1 + (fuzz / 100) * 0.88;
-    // Germanium transistor bias drift: operating point shifts with fuzz knob,
-    // making the clipping highly asymmetric at high settings (classic Fuzz Face behaviour).
-    // At low fuzz it's nearly clean; at high fuzz positive clips much harder than negative.
-    const bias = (fuzz / 100) * 0.22;
+    const k = 0.1 + (fuzz / 100) * 0.89; // 0.1–0.99 clip threshold
     for (let i = 0; i < n; i++) {
-      const x  = (i * 2) / n - 1;
-      const xb = x + bias;
-      let y;
-      if (xb > k) {
-        // Positive: hard clip + small overshoot rolloff (germanium softens near rail)
-        y = k + (xb - k) * 0.04;
-      } else if (xb < -(k * 0.7)) {
-        // Negative: clips at a lower threshold — asymmetric, gets more 2nd harmonic
-        y = -(k * 0.7) + (xb + k * 0.7) * 0.06;
-      } else {
-        y = xb;
-      }
-      curve[i] = y - bias * 0.5;
+      const x = (i * 2) / n - 1;
+      // Square-wave-ish hard clip for vintage fuzz character
+      if (x > k)       curve[i] =  k + (x - k) * 0.05;
+      else if (x < -k) curve[i] = -k + (x + k) * 0.05;
+      else              curve[i] = x;
     }
     return curve;
   }
 
   function update(p) {
-    preGain.gain.value    = 2 + Math.sqrt(p.fuzz / 100) * 6;
+    preGain.gain.value    = 2 + (p.fuzz / 100) * 20;
     shaper.curve          = makeCurve(p.fuzz);
-    toneF.frequency.value = 500 + (p.tone / 100) * 4500;
+    toneF.frequency.value = 500 + (p.tone / 100) * 4500; // 500–5000 Hz
     outGain.gain.value    = (p.level / 100) * 1.0;
   }
   update(params);
@@ -960,7 +908,10 @@ function buildFXUI() {
         </div>
       `;
       const bypassDot = el.querySelector('.pedal-bypass');
-      onTap(bypassDot, () => togglePedal(def.id, el));
+      bypassDot.addEventListener('click', (e) => {
+        e.stopPropagation();
+        togglePedal(def.id, el);
+      });
       list.appendChild(el);
       return;
     }
@@ -988,10 +939,14 @@ function buildFXUI() {
     const bypassDot = el.querySelector('.pedal-bypass');
 
     // Footswitch dot: ONLY thing that turns the pedal on/off.
-    onTap(bypassDot, () => setPedalActive(def.id, el, !pedal.active));
+    bypassDot.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setPedalActive(def.id, el, !pedal.active);
+    });
 
     // Header (name/desc area): ONLY expands/collapses the controls.
-    onTap(header, (e) => {
+    // Does not touch active state, so there's no on/off ambiguity to fight with.
+    header.addEventListener('click', (e) => {
       if (e.target === bypassDot || bypassDot.contains(e.target)) return;
       pedal.open = !pedal.open;
       el.classList.toggle('open', pedal.open);
