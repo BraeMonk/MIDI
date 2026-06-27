@@ -1,3 +1,4 @@
+let _lastTouch = 0;
 /* ─────────────────────────────────────────────
    RELAY — MIDI Controller PWA  ·  app.js v0.2.1
    ───────────────────────────────────────────── */
@@ -702,7 +703,6 @@ function attachKeyEvents(el, note, isBlack) {
   };
 
   const onRelease = (e) => {
-    if (e && e.cancelable) e.preventDefault();
     if (state.chordMode) {
       stopChord(note);
     } else {
@@ -710,12 +710,12 @@ function attachKeyEvents(el, note, isBlack) {
     }
   };
 
-  el.addEventListener('touchstart',  onPress,   { passive: true });
-  el.addEventListener('touchend',    onRelease, { passive: false });
-  el.addEventListener('touchcancel', onRelease, { passive: false });
-  el.addEventListener('mousedown',   onPress);
-  el.addEventListener('mouseup',     onRelease);
-  el.addEventListener('mouseleave',  (e) => { if (el.classList.contains('active')) onRelease(e); });
+  el.addEventListener('touchstart',  (e) => { _lastTouch = Date.now(); onPress(e); }, { passive: true });
+  el.addEventListener('touchend',    onRelease, { passive: true });
+  el.addEventListener('touchcancel', onRelease, { passive: true });
+  el.addEventListener('mousedown',   (e) => { if (Date.now() - _lastTouch > 500) onPress(e); });
+  el.addEventListener('mouseup',     (e) => { if (Date.now() - _lastTouch > 500) onRelease(e); });
+  el.addEventListener('mouseleave',  (e) => { if (Date.now() - _lastTouch > 500 && el.classList.contains('active')) onRelease(e); });
 }
 
 // ── DRUM GRID BUILD ────────────────────────────
@@ -759,9 +759,8 @@ function buildDrumGrid() {
       }
     };
 
-    el.addEventListener('touchstart', fire, { passive: true });
-    el.addEventListener('touchend', function(e) { e.preventDefault(); }, { passive: false });
-    el.addEventListener('mousedown',  fire);
+    el.addEventListener('touchstart', (e) => { _lastTouch = Date.now(); fire(e); }, { passive: true });
+    el.addEventListener('mousedown',  (e) => { if (Date.now() - _lastTouch > 500) fire(e); });
 
     wireLoopDot(el.querySelector('.pad-loop-dot'), i, def, el);
 
@@ -790,8 +789,8 @@ function wireLoopDot(dot, padIndex, def, padEl) {
   dot.addEventListener('touchstart', start, { passive: true });
   dot.addEventListener('touchend',   end,   { passive: true });
   dot.addEventListener('touchcancel', () => clearTimeout(timer), { passive: true });
-  dot.addEventListener('mousedown', start);
-  dot.addEventListener('mouseup',   end);
+  dot.addEventListener('mousedown', (e) => { if (Date.now() - _lastTouch > 500) start(e); });
+  dot.addEventListener('mouseup',   (e) => { if (Date.now() - _lastTouch > 500) end(e); });
 }
 
 // ── PAD LOOP SEQUENCER ─────────────────────────
