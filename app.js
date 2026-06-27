@@ -1470,10 +1470,13 @@ function init() {
   document.addEventListener('touchstart', onFirstGesture, { once: true });
   document.addEventListener('mousedown',  onFirstGesture, { once: true });
 
-  // iOS scroll fix
+  // iOS scroll fix: allow native scroll on panel-scroll containers.
+  // stopPropagation on touchmove was preventing scroll — removed.
+  // touch-action: pan-y is set in CSS; this just ensures no stray
+  // preventDefault calls block the browser's native pan gesture.
   document.querySelectorAll('.panel-scroll').forEach(el => {
     el.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
-    el.addEventListener('touchmove',  e => e.stopPropagation(), { passive: true });
+    el.addEventListener('touchmove',  e => { /* allow native scroll */ }, { passive: true });
   });
 }
 
