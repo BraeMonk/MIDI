@@ -470,11 +470,120 @@ function initLooper() {
   document.getElementById('looper-clear-all').addEventListener('click', clearAllLayers);
   document.getElementById('looper-bounce-btn').addEventListener('click', bounceLoop);
 
-  // Floating record button — works from any tab
+  // Floating record button — draggable, works from any tab
   var floatBtn = document.getElementById('float-rec-btn');
   if (floatBtn) {
-    floatBtn.addEventListener('touchend', function(e) { e.preventDefault(); toggleLooperRecord(); });
-    floatBtn.addEventListener('click', toggleLooperRecord);
+    initFloatBtnDrag(floatBtn);
+  }
+}
+
+function initFloatBtnDrag(btn) {
+  var SIZE    = 56;   // btn diameter
+  var MARGIN  = 10;   // min distance from screen edge
+  var DRAG_THRESHOLD = 6; // px movement before we consider it a drag, not a tap
+
+  // ── Restore saved position ──────────────────────────
+  var saved = null;
+  try { saved = JSON.parse(localStorage.getItem('relay-float-pos')); } catch(e) {}
+  if (saved && typeof saved.right === 'number' && typeof saved.bottom === 'number') {
+    btn.style.right  = saved.right  + 'px';
+    btn.style.bottom = saved.bottom + 'px';
+    btn.style.left   = '';
+    btn.style.top    = '';
+  }
+
+  function clamp(val, lo, hi) { return Math.max(lo, Math.min(hi, val)); }
+
+  function savePos(right, bottom) {
+    try { localStorage.setItem('relay-float-pos', JSON.stringify({ right, bottom })); } catch(e) {}
+  }
+
+  // ── Drag state ──────────────────────────────────────
+  var dragging   = false;
+  var didDrag    = false;
+  var startX     = 0;
+  var startY     = 0;
+  var startRight = 0;
+  var startBot   = 0;
+
+  function getBtnRight()  {
+    return window.innerWidth  - btn.getBoundingClientRect().right;
+  }
+  function getBtnBottom() {
+    return window.innerHeight - btn.getBoundingClientRect().bottom;
+  }
+
+  function onStart(clientX, clientY) {
+    dragging   = true;
+    didDrag    = false;
+    startX     = clientX;
+    startY     = clientY;
+    startRight = getBtnRight();
+    startBot   = getBtnBottom();
+  }
+
+  function onMove(clientX, clientY) {
+    if (!dragging) return;
+    var dx = clientX - startX;
+    var dy = clientY - startY;
+    if (!didDrag && Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
+    didDrag = true;
+    btn.classList.add('dragging');
+
+    // right/bottom because the button is anchored from bottom-right
+    var newRight  = clamp(startRight  - dx, MARGIN, window.innerWidth  - SIZE - MARGIN);
+    var newBottom = clamp(startBot    - dy, MARGIN, window.innerHeight - SIZE - MARGIN);
+
+    btn.style.right  = newRight  + 'px';
+    btn.style.bottom = newBottom + 'px';
+    btn.style.left   = '';
+    btn.style.top    = '';
+  }
+
+  function onEnd() {
+    if (!dragging) return;
+    dragging = false;
+    btn.classList.remove('dragging');
+
+    if (didDrag) {
+      savePos(getBtnRight(), getBtnBottom());
+    } else {
+      // It was a tap — trigger record
+      toggleLooperRecord();
+    }
+    didDrag = false;
+  }
+
+  // Touch
+  btn.addEventListener('touchstart', function(e) {
+    e.preventDefault(); // stop scroll + suppress synthetic mouse events
+    var t = e.touches[0];
+    onStart(t.clientX, t.clientY);
+  }, { passive: false });
+
+  btn.addEventListener('touchmove', function(e) {
+    e.preventDefault();
+    var t = e.touches[0];
+    onMove(t.clientX, t.clientY);
+  }, { passive: false });
+
+  btn.addEventListener('touchend', function(e) {
+    e.preventDefault();
+    onEnd();
+  }, { passive: false });
+
+  // Mouse (desktop fallback)
+  btn.addEventListener('mousedown', function(e) {
+    onStart(e.clientX, e.clientY);
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup',   onMouseUp);
+  });
+
+  function onMouseMove(e) { onMove(e.clientX, e.clientY); }
+  function onMouseUp()    {
+    onEnd();
+    window.removeEventListener('mousemove', onMouseMove);
+    window.removeEventListener('mouseup',   onMouseUp);
   }
 }
 window.initLooper = initLooper;
