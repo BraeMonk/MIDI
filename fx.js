@@ -960,10 +960,7 @@ function buildFXUI() {
         </div>
       `;
       const bypassDot = el.querySelector('.pedal-bypass');
-      bypassDot.addEventListener('click', (e) => {
-        e.stopPropagation();
-        togglePedal(def.id, el);
-      });
+      onTap(bypassDot, () => togglePedal(def.id, el));
       list.appendChild(el);
       return;
     }
@@ -991,14 +988,10 @@ function buildFXUI() {
     const bypassDot = el.querySelector('.pedal-bypass');
 
     // Footswitch dot: ONLY thing that turns the pedal on/off.
-    bypassDot.addEventListener('click', (e) => {
-      e.stopPropagation();
-      setPedalActive(def.id, el, !pedal.active);
-    });
+    onTap(bypassDot, () => setPedalActive(def.id, el, !pedal.active));
 
     // Header (name/desc area): ONLY expands/collapses the controls.
-    // Does not touch active state, so there's no on/off ambiguity to fight with.
-    header.addEventListener('click', (e) => {
+    onTap(header, (e) => {
       if (e.target === bypassDot || bypassDot.contains(e.target)) return;
       pedal.open = !pedal.open;
       el.classList.toggle('open', pedal.open);
