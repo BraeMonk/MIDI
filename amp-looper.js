@@ -67,10 +67,10 @@ function makeGateCurve(threshold) {
 
 const CAB_IR_PARAMS = {
   //           boxHz  boxQ   coneHz  coneQ  proximity  airLoss  length
-  clean:    { box: 130, bQ: 1.8, cone: 2800, cQ: 0.7, prox: 0.55, air: 0.30, ms: 180 },
-  crunch:   { box: 120, bQ: 2.0, cone: 2600, cQ: 0.8, prox: 0.50, air: 0.28, ms: 180 },
-  lead:     { box: 110, bQ: 2.2, cone: 2400, cQ: 0.9, prox: 0.45, air: 0.26, ms: 160 },
-  metal:    { box: 100, bQ: 2.5, cone: 2200, cQ: 1.0, prox: 0.40, air: 0.22, ms: 150 },
+  clean:    { box: 130, bQ: 1.8, cone: 2800, cQ: 0.7, prox: 0.55, air: 0.30, ms: 140 },
+  crunch:   { box: 120, bQ: 2.0, cone: 2600, cQ: 0.8, prox: 0.50, air: 0.28, ms: 120 },
+  lead:     { box: 110, bQ: 2.2, cone: 2400, cQ: 0.9, prox: 0.45, air: 0.26, ms:  95 },
+  metal:    { box: 100, bQ: 2.5, cone: 2200, cQ: 1.0, prox: 0.40, air: 0.22, ms:  80 },
   bass:     { box: 80,  bQ: 2.8, cone: 1000, cQ: 0.6, prox: 0.70, air: 0.40, ms: 200 },
   acoustic: { box: 160, bQ: 1.4, cone: 4000, cQ: 0.5, prox: 0.65, air: 0.35, ms: 220 },
 };
@@ -137,10 +137,15 @@ function buildCabIR(ctx, voice) {
       data[i] += proximity * blend;
     }
 
-    // Normalize so loudest sample = 0.9
-    let peak = 0;
-    for (let i = 0; i < len; i++) peak = Math.max(peak, Math.abs(data[i]));
-    if (peak > 0) for (let i = 0; i < len; i++) data[i] = data[i] / peak * 0.9;
+    // RMS-normalize to a consistent target level so cab-on and cab-off match in
+    // perceived loudness. Peak normalization (what Web Audio does with normalize=true)
+    // gets thrown off by the early-reflection spikes and makes the cab signal too quiet.
+    const TARGET_RMS = 0.18;
+    let sumSq = 0;
+    for (let i = 0; i < len; i++) sumSq += data[i] * data[i];
+    const rms = Math.sqrt(sumSq / len);
+    const scale = rms > 0 ? TARGET_RMS / rms : 1;
+    for (let i = 0; i < len; i++) data[i] *= scale;
   }
 
   return buf;
@@ -182,7 +187,7 @@ function buildAmpChain(ctx) {
 
   // Cabinet: ConvolverNode with synthetic IR (or user-loaded real IR)
   // cabDry is the bypass path for when cab sim is off
-  const convolver = ctx.createConvolver(); convolver.normalize = true;
+  const convolver = ctx.createConvolver(); convolver.normalize = false;
   const cabGain   = ctx.createGain(); cabGain.gain.value = 1;    // cab wet
   const cabDry    = ctx.createGain(); cabDry.gain.value  = 0;    // cab bypass (flat)
   const cabMerge  = ctx.createGain();
