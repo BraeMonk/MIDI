@@ -658,6 +658,8 @@
       bottom: 28px;
       right: 18px;
       z-index: 900;
+      user-select: none;
+      -webkit-user-select: none;
       width: 56px;
       height: 56px;
       border-radius: 50%;
@@ -694,6 +696,12 @@
       color: #fff;
       box-shadow: 0 0 20px rgba(240,92,92,0.5);
       animation: rec-pulse 1s ease-in-out infinite;
+    }
+    #float-rec-btn.dragging {
+      opacity: 0.85;
+      transform: scale(1.08);
+      transition: transform 0.1s, opacity 0.1s;
+      cursor: grabbing;
     }
     #float-rec-btn.armed {
       border-color: var(--amber);
@@ -782,7 +790,7 @@
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 6px;
-      overflow: clip; /* clip = visual clipping only, NOT a scroll container — iOS won't swallow scroll gestures here */
+      overflow: clip;
     }
     .config-group-title {
       font-size: 8px;
@@ -1010,7 +1018,7 @@
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      overflow: clip; /* clip = visual only, not a scroll container */
+      overflow: clip;
       transition: border-color 0.15s;
     }
     .pedal.active {
