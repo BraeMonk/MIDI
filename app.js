@@ -684,7 +684,6 @@ function buildKeyboard() {
 
 function attachKeyEvents(el, note, isBlack) {
   const onPress = (e) => {
-    e.preventDefault();
     let relY = 0.5;
     if (e.touches) {
       const t = e.changedTouches[0];
@@ -703,7 +702,6 @@ function attachKeyEvents(el, note, isBlack) {
   };
 
   const onRelease = (e) => {
-    if (e && e.preventDefault) e.preventDefault();
     if (state.chordMode) {
       stopChord(note);
     } else {
@@ -711,9 +709,9 @@ function attachKeyEvents(el, note, isBlack) {
     }
   };
 
-  el.addEventListener('touchstart',  onPress,   { passive: false });
-  el.addEventListener('touchend',    onRelease, { passive: false });
-  el.addEventListener('touchcancel', onRelease, { passive: false });
+  el.addEventListener('touchstart',  onPress,   { passive: true });
+  el.addEventListener('touchend',    onRelease, { passive: true });
+  el.addEventListener('touchcancel', onRelease, { passive: true });
   el.addEventListener('mousedown',   onPress);
   el.addEventListener('mouseup',     onRelease);
   el.addEventListener('mouseleave',  (e) => { if (el.classList.contains('active')) onRelease(e); });
@@ -739,7 +737,6 @@ function buildDrumGrid() {
     applyPadLoopVisual(i, el);
 
     const fire = (e) => {
-      e.preventDefault();
       getAudio();
       let vel = 100;
       const point = e.changedTouches ? e.changedTouches[0] : e;
@@ -761,7 +758,7 @@ function buildDrumGrid() {
       }
     };
 
-    el.addEventListener('touchstart', fire, { passive: false });
+    el.addEventListener('touchstart', fire, { passive: true });
     el.addEventListener('mousedown',  fire);
 
     wireLoopDot(el.querySelector('.pad-loop-dot'), i, def, el);
@@ -776,8 +773,6 @@ function wireLoopDot(dot, padIndex, def, padEl) {
   let longFired = false;
 
   const start = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
     longFired = false;
     timer = setTimeout(() => {
       longFired = true;
@@ -785,15 +780,13 @@ function wireLoopDot(dot, padIndex, def, padEl) {
     }, LONG_PRESS_MS);
   };
   const end = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
     clearTimeout(timer);
     if (longFired) return;
     cyclePadLoop(padIndex, padEl);
   };
 
-  dot.addEventListener('touchstart', start, { passive: false });
-  dot.addEventListener('touchend',   end,   { passive: false });
+  dot.addEventListener('touchstart', start, { passive: true });
+  dot.addEventListener('touchend',   end,   { passive: true });
   dot.addEventListener('touchcancel', () => clearTimeout(timer), { passive: true });
   dot.addEventListener('mousedown', start);
   dot.addEventListener('mouseup',   end);
@@ -1470,14 +1463,7 @@ function init() {
   document.addEventListener('touchstart', onFirstGesture, { once: true });
   document.addEventListener('mousedown',  onFirstGesture, { once: true });
 
-  // iOS scroll fix: allow native scroll on panel-scroll containers.
-  // stopPropagation on touchmove was preventing scroll — removed.
-  // touch-action: pan-y is set in CSS; this just ensures no stray
-  // preventDefault calls block the browser's native pan gesture.
-  document.querySelectorAll('.panel-scroll').forEach(el => {
-    el.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
-    el.addEventListener('touchmove',  e => { /* allow native scroll */ }, { passive: true });
-  });
+
 }
 
 init();
