@@ -762,6 +762,7 @@
     refreshAIStatusLabel();
     updateUI();
     showToast(`${bot.name} joined the jam — ${bot.desc}`);
+    if (typeof saveSettings === 'function') saveSettings();
   }
 
   function removeAIBot(code) {
@@ -782,6 +783,7 @@
       refreshAIStatusLabel();
       updateUI();
     }
+    if (typeof saveSettings === 'function') saveSettings();
   }
 
   function stopAllAIBots() {
@@ -1039,6 +1041,11 @@
     get connected() {
       return !!(dataConn && dataConn.open);
     },
+
+    // Returns array of currently active bot codes — used by saveSettings
+    activeBotCodes() {
+      return Array.from(activeBots.keys());
+    },
   };
 
   window.RelayPeer = RelayPeer;
@@ -1195,6 +1202,7 @@
           <span id="rp-code-label">CODE</span>
           <span id="rp-code-val">——————</span>
           <button id="rp-copy-btn" title="Copy code">⎘</button>
+          <button id="rp-share-btn" title="Copy invite link">🔗</button>
         </div>
 
         <!-- Join input row (before session) -->
@@ -1253,6 +1261,13 @@
     document.getElementById('rp-copy-btn').addEventListener('click', () => {
       const code = document.getElementById('rp-code-val').textContent;
       navigator.clipboard.writeText(code).then(() => showToast('Code copied: ' + code));
+    });
+
+    document.getElementById('rp-share-btn').addEventListener('click', () => {
+      const code = document.getElementById('rp-code-val').textContent;
+      if (code === '——————') { showToast('Host a session first'); return; }
+      const url = location.origin + location.pathname + '?join=' + code;
+      navigator.clipboard.writeText(url).then(() => showToast('Invite link copied — send it to your jam partner'));
     });
   }
 
