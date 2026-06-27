@@ -59,9 +59,9 @@ function startGateEnvelope(ctx, tapNode, gateGainNode) {
   let raf = null;
   let gateOpen = true;
 
-  const THRESHOLD = 0.012; // same level the old curve used, now as an RMS gate threshold
+  const THRESHOLD = 0.004; // lowered — 0.012 was missing soft picking dynamics
   const ATTACK_TAU  = 0.004; // ~4ms: snaps shut quickly on noise/hum between notes
-  const RELEASE_TAU = 0.22;  // ~220ms: lets a strum's natural decay ring out, not cut off
+  const RELEASE_TAU = 0.45;  // ~450ms: was cutting sustain short at 220ms — give it more room to ring out
 
   function tick() {
     raf = requestAnimationFrame(tick);
