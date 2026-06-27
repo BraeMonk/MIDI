@@ -784,6 +784,264 @@
         }
       },
     },
+
+    // ── Responsive Bass ───────────────────────────────────────────
+    AI0016: {
+      name: 'Responsive Bass',
+      desc: 'Mirrors your density and syncopation — walking lines when you\'re busy, root notes when you\'re sparse.',
+      synthType: 'bass',
+
+      _pattern: [], // { step, degree, octShift } rebuilt every 2 bars
+
+      onBarStart(barIdx) {
+        if (barIdx % 2 !== 0) return;
+        const f  = window._relayFeel || _feel;
+        const fx = fxIntensityMod();
+
+        const pattern = [];
+
+        if (f.isSilent) {
+          // Single root on the 1 — just holding down the fort
+          pattern.push({ step: 0, degree: 0, octShift: -2 });
+          this._pattern = pattern;
+          return;
+        }
+
+        // Always anchor on beat 1
+        pattern.push({ step: 0, degree: 0, octShift: -2 });
+
+        // Beat 3 appears when playing at any real density
+        if (f.density > 0.2) pattern.push({ step: 8, degree: 0, octShift: -2 });
+
+        // 8th-note walking — degree choices get more adventurous with syncopation
+        if (f.density > 0.35) {
+          const walkDegrees = f.syncopation > 0.5
+            ? [0, 2, 4, 3, 4, 2] // chromatic-flavoured walk for syncopated players
+            : [0, 4, 0, 4, 0, 4]; // root-fifth for on-beat players
+          [2, 4, 6, 10, 12, 14].forEach((step, i) => {
+            if (Math.random() < f.density * 1.4) {
+              pattern.push({ step, degree: walkDegrees[i % walkDegrees.length], octShift: -2 });
+            }
+          });
+        }
+
+        // Syncopated off-beat hits mirror human syncopation
+        if (f.syncopation > 0.45) {
+          [1, 3, 5, 9, 11, 13].forEach(step => {
+            if (Math.random() < (f.syncopation - 0.45) * 1.8) {
+              pattern.push({ step, degree: [0, 2, 4][Math.floor(Math.random() * 3)], octShift: -2 });
+            }
+          });
+        }
+
+        // FX-driven extra passing notes
+        if (fx > 0.4 && f.density > 0.4) {
+          [3, 7, 11, 15].forEach(step => {
+            if (Math.random() < fx * 0.35) {
+              pattern.push({ step, degree: 4, octShift: -2 }); // fifth as passing note
+            }
+          });
+        }
+
+        // Deduplicate steps (keep first occurrence)
+        const seen = new Set();
+        this._pattern = pattern.filter(p => {
+          if (seen.has(p.step)) return false;
+          seen.add(p.step);
+          return true;
+        });
+      },
+
+      onStep(step) {
+        const hit = this._pattern.find(p => p.step === step);
+        if (!hit) return;
+
+        const f   = window._relayFeel || _feel;
+        const fx  = fxIntensityMod();
+
+        // Burstiness: skip non-anchor hits during gaps
+        const isAnchor = step === 0 || step === 8;
+        if (!isAnchor && f.burstiness > 0.5 && Math.random() < f.burstiness * 0.4) return;
+
+        const note = scaleNote(hit.degree, hit.octShift);
+        const vel  = Math.round(
+          f.velocityMean * 115 +
+          (isAnchor ? 10 : -5) +
+          fx * 12 +
+          (Math.random() - 0.5) * f.velocityVariance * 20
+        );
+        aiNoteOn(this._code, note, Math.max(40, Math.min(127, vel)), this.synthType);
+
+        // Note duration: longer notes when sparse, shorter when dense/syncopated
+        const durMult = f.density < 0.3 ? 3.5 : f.syncopation > 0.5 ? 0.7 : 1.2;
+        setTimeout(() => aiNoteOff(this._code, note), stepDurMs() * durMult);
+      },
+    },
+
+    // ── Responsive Pad ────────────────────────────────────────────
+    AI0017: {
+      name: 'Responsive Pad',
+      desc: 'Swells in when you play hard, fades back when you\'re sparse. Changes chords with your energy.',
+      synthType: 'pad',
+
+      _chordDegree: 0,
+      _chordNotes:  [],
+      _changeEvery: 4, // bars between chord changes — shrinks as density rises
+
+      onBarStart(barIdx) {
+        const f  = window._relayFeel || _feel;
+
+        // How often chords change tracks density
+        // Sparse playing → slow changes (every 4 bars)
+        // Dense playing  → faster changes (every 1 bar)
+        this._changeEvery = f.density < 0.2 ? 4
+                          : f.density < 0.4 ? 3
+                          : f.density < 0.6 ? 2
+                          : 1;
+
+        if (barIdx % this._changeEvery !== 0) return;
+
+        // Silent → release all, no new chord
+        if (f.isSilent) {
+          aiBotNotesOff(this._code);
+          this._chordNotes = [];
+          return;
+        }
+
+        aiBotNotesOff(this._code);
+
+        // Chord degree: cycle I → IV → V → IV or I → vi → IV → V
+        // based on syncopation (jazzy vs straight)
+        const straightProg = [0, 3, 4, 3];
+        const jazzProg     = [0, 5, 3, 4]; // I–vi–IV–V
+        const prog = f.syncopation > 0.5 ? jazzProg : straightProg;
+        this._chordDegree  = prog[Math.floor(barIdx / this._changeEvery) % prog.length];
+
+        // Voicing: triad + optional 7th when player is expressive
+        const degrees = [0, 2, 4];
+        if (f.velocityVariance > 0.4) degrees.push(6); // add 7th for expressive players
+
+        this._chordNotes = degrees.map(d => scaleNote(this._chordDegree + d, -1));
+
+        // Velocity tracks human's mean + variance as a swell shape
+        const vel = Math.round(
+          f.velocityMean * 95 +
+          f.velocityVariance * 20 +
+          fxIntensityMod() * 20
+        );
+
+        this._chordNotes.forEach(note => {
+          aiNoteOn(this._code, note, Math.max(30, Math.min(120, vel)), this.synthType);
+        });
+      },
+
+      onStep(step) {
+        // Pad sustains — no per-step logic needed.
+        // Velocity swells happen at bar boundaries via onBarStart.
+      },
+    },
+
+    // ── Responsive Keys ───────────────────────────────────────────
+    AI0018: {
+      name: 'Responsive Keys',
+      desc: 'Comping style shifts with your feel — off-beat stabs when you\'re syncopated, space when you\'re sparse.',
+      synthType: 'keys',
+
+      _compSteps: new Set(), // rebuilt every 2 bars
+      _chordRoot: 0,
+
+      onBarStart(barIdx) {
+        if (barIdx % 2 !== 0) return;
+        const f  = window._relayFeel || _feel;
+        const fx = fxIntensityMod();
+
+        // Chord root follows a simple I–IV–V–I cycle
+        const prog = [0, 3, 4, 0];
+        this._chordRoot = prog[Math.floor(barIdx / 2) % prog.length];
+
+        const steps = new Set();
+
+        if (f.isSilent) {
+          // Single comp on beat 1 to keep time
+          steps.add(0);
+          this._compSteps = steps;
+          return;
+        }
+
+        // On-beat comping base — always present
+        if (f.density > 0.15) steps.add(0);
+        if (f.density > 0.25) steps.add(8);
+
+        // Off-beat comping mirrors syncopation
+        // Low syncopation → on-beat only; high → off-beat stabs
+        if (f.syncopation > 0.3) {
+          const offBeats = [2, 6, 10, 14];
+          offBeats.forEach(s => {
+            if (Math.random() < f.syncopation * 0.9) steps.add(s);
+          });
+        }
+
+        // High density → more fills between the stabs
+        if (f.density > 0.55) {
+          [4, 12].forEach(s => {
+            if (Math.random() < (f.density - 0.55) * 2) steps.add(s);
+          });
+        }
+
+        // Bursty player → keys also play in bursts
+        // Remove some steps to create matching gaps
+        if (f.burstiness > 0.45) {
+          const stepArr = Array.from(steps);
+          stepArr.forEach(s => {
+            if (s !== 0 && Math.random() < f.burstiness * 0.4) steps.delete(s);
+          });
+        }
+
+        // FX adds extra 16th-note stabs
+        if (fx > 0.5) {
+          [1, 3, 9, 11].forEach(s => {
+            if (Math.random() < fx * 0.3) steps.add(s);
+          });
+        }
+
+        this._compSteps = steps;
+      },
+
+      onStep(step) {
+        if (!this._compSteps.has(step)) return;
+
+        const f   = window._relayFeel || _feel;
+        const fx  = fxIntensityMod();
+        const isDownbeat = step === 0 || step === 8;
+
+        // Velocity: louder on downbeats, scaled by human's mean + variance
+        const vel = Math.round(
+          f.velocityMean * 100 +
+          (isDownbeat ? 15 : -10) +
+          (Math.random() - 0.5) * f.velocityVariance * 30 +
+          fx * 15
+        );
+
+        // Voicing: root + third for sparse, full triad for dense, add 7th for expressive
+        const degrees = [0, 2];
+        if (f.density > 0.3)          degrees.push(4);
+        if (f.velocityVariance > 0.45) degrees.push(6);
+
+        const notes = degrees.map(d => scaleNote(this._chordRoot + d, 0));
+        notes.forEach(note => {
+          aiNoteOn(this._code, note, Math.max(35, Math.min(120, vel)), this.synthType);
+        });
+
+        // Duration: staccato for syncopated/dense, longer for sparse
+        const durMult = f.syncopation > 0.5 || f.density > 0.5
+          ? 0.5 + fx * 0.3
+          : 1.8 - f.density;
+        const dur = stepDurMs() * Math.max(0.35, Math.min(2.5, durMult));
+        notes.forEach(note => {
+          setTimeout(() => aiNoteOff(this._code, note), dur);
+        });
+      },
+    },
   };
 
   // ── Pitch helpers for AI0008 ──────────────────────────────────────
@@ -1430,7 +1688,8 @@
           AI0007 Drums · AI0008 Lead (pitch-tracks you)<br/>
           AI0009 Drums (half-time) · AI0010 Drums (shuffle) · AI0011 Drums (jazz)<br/>
           AI0012 Arpeggio · AI0013 Rhythm Stabs · AI0014 Call &amp; Response<br/>
-          AI0015 Responsive Drums (adapts to your feel)
+          AI0015 Responsive Drums (adapts to your feel)<br/>
+          AI0016 Responsive Bass · AI0017 Responsive Pad · AI0018 Responsive Keys
         </div>
 
         <!-- Active AI band members (band mode) -->
