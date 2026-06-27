@@ -711,7 +711,7 @@ function attachKeyEvents(el, note, isBlack) {
   };
 
   el.addEventListener('touchstart',  (e) => { _lastTouch = Date.now(); onPress(e); }, { passive: true });
-  el.addEventListener('touchend',    onRelease, { passive: true });
+  el.addEventListener('touchend',    (e) => { e.preventDefault(); onRelease(e); });
   el.addEventListener('touchcancel', onRelease, { passive: true });
   el.addEventListener('mousedown',   (e) => { if (Date.now() - _lastTouch > 500) onPress(e); });
   el.addEventListener('mouseup',     (e) => { if (Date.now() - _lastTouch > 500) onRelease(e); });
