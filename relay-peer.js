@@ -624,6 +624,166 @@
         }
       },
     },
+
+    // ── Responsive drummer — the showpiece ────────────────────────
+    // AI0015 listens to analyseHumanFeel() output every bar and
+    // continuously reshapes its pattern to mirror your playing style.
+    //
+    //  density      → how many drum hits it plays (sparse vs busy)
+    //  syncopation  → whether kicks/snares drift off the grid
+    //  velocityMean → how hard it hits overall
+    //  velocityVariance → how dynamic (ghost notes vs consistent hits)
+    //  burstiness   → whether it plays in phrase-bursts or steady stream
+    //  isSilent     → drops to a single kick heartbeat when you stop
+    //
+    // The pattern is rebuilt every 2 bars so it feels like it's
+    // "deciding" rather than just blindly mirroring.
+    AI0015: {
+      name: 'Responsive Drums',
+      desc: 'Listens to your feel — density, syncopation, dynamics — and adapts every 2 bars.',
+      synthType: null,
+
+      // Current resolved pattern — rebuilt on bar boundary
+      _kickSteps:  new Set([0, 8]),
+      _snareSteps: new Set([4, 12]),
+      _hatSteps:   new Set([0, 2, 4, 6, 8, 10, 12, 14]),
+      _ghostSteps: new Set(),
+      _accentSteps: new Set([0, 4, 8, 12]),
+
+      onBarStart(barIdx) {
+        // Rebuild every 2 bars so transitions feel considered, not twitchy
+        if (barIdx % 2 !== 0) return;
+
+        const f       = window._relayFeel || _feel;
+        const fx      = fxIntensityMod();
+
+        // ── Silence mode: just a heartbeat kick ──
+        if (f.isSilent) {
+          this._kickSteps   = new Set([0]);
+          this._snareSteps  = new Set();
+          this._hatSteps    = new Set();
+          this._ghostSteps  = new Set();
+          this._accentSteps = new Set([0]);
+          return;
+        }
+
+        // ── Kick placement ──
+        // Base: always on 1. Add syncopated hits based on human syncopation.
+        const kicks = new Set([0]);
+        if (f.density > 0.3)    kicks.add(8);   // beat 3 when playing steadily
+        if (f.syncopation > 0.4) {
+          // Off-beat kicks mirror human's rhythmic adventurousness
+          if (Math.random() < f.syncopation * 0.8) kicks.add(6);
+          if (Math.random() < f.syncopation * 0.6) kicks.add(10);
+          if (Math.random() < f.syncopation * 0.4) kicks.add(14);
+        }
+        if (f.density > 0.6 && Math.random() < 0.5) kicks.add(3); // dense playing → busier kick
+        this._kickSteps = kicks;
+
+        // ── Snare placement ──
+        const snares = new Set([4, 12]); // 2 and 4 always
+        if (f.syncopation > 0.55 && Math.random() < f.syncopation) {
+          // Syncopated player gets an extra off-beat snare
+          const candidates = [2, 6, 10, 14].filter(s => !kicks.has(s));
+          if (candidates.length) snares.add(candidates[Math.floor(Math.random() * candidates.length)]);
+        }
+        this._snareSteps = snares;
+
+        // ── Hi-hat density mirrors human density ──
+        const hats = new Set();
+        // Quarter notes as floor
+        [0, 4, 8, 12].forEach(s => hats.add(s));
+        if (f.density > 0.25) [2, 6, 10, 14].forEach(s => hats.add(s)); // 8ths
+        if (f.density > 0.55) [1, 3, 5, 7, 9, 11, 13, 15].forEach(s => {
+          // 16ths only where human is dense — probabilistic
+          if (Math.random() < (f.density - 0.55) * 2.2) hats.add(s);
+        });
+        // FX-driven extra 16ths on top
+        if (fx > 0.5) [1, 3, 5, 9, 11, 13].forEach(s => {
+          if (Math.random() < fx * 0.4) hats.add(s);
+        });
+        this._hatSteps = hats;
+
+        // ── Ghost notes mirror velocity variance ──
+        const ghosts = new Set();
+        if (f.velocityVariance > 0.2) {
+          // More variance = more ghost snares
+          const ghostCandidates = [1, 3, 5, 7, 9, 11, 13, 15];
+          ghostCandidates.forEach(s => {
+            if (!snares.has(s) && Math.random() < f.velocityVariance * 0.5) ghosts.add(s);
+          });
+        }
+        this._ghostSteps = ghosts;
+
+        // ── Accent map follows human velocity mean ──
+        // Loud player → more accents; quiet player → everything pulled back
+        this._accentSteps = new Set([0, 4, 8, 12]);
+        if (f.syncopation > 0.5) {
+          // Move accents off the grid to match syncopated feel
+          this._accentSteps.delete(4);
+          this._accentSteps.add(f.syncopation > 0.7 ? 3 : 6);
+        }
+      },
+
+      onStep(step) {
+        const pads   = (window.state && window.state.padDefs) || [];
+        const f      = window._relayFeel || _feel;
+        const fx     = fxIntensityMod();
+        const find   = (exact, fb) => {
+          const p = pads.find(d => d.name && d.name.toLowerCase() === exact.toLowerCase());
+          return p ? p.note : (pads[fb] ? pads[fb].note : null);
+        };
+
+        const kickNote  = find('Kick',   0);
+        const snareNote = find('Snare',  1);
+        const hatNote   = find('Hi-Hat', 2);
+        const drum = (note, vel) => {
+          if (note == null) return;
+          receiveHandler({ type: 'drum', note, velocity: Math.round(Math.max(1, Math.min(127, vel))) });
+        };
+
+        // Base velocity tracks human's mean velocity
+        const baseVel = Math.round(f.velocityMean * 127);
+        const isAccent = this._accentSteps.has(step);
+
+        // ── Burstiness: skip hits randomly during non-accent steps ──
+        // High burstiness = playing in bursts → bot also leaves gaps
+        const skip = !isAccent && f.burstiness > 0.4 && Math.random() < f.burstiness * 0.45;
+
+        // Kick
+        if (!skip && this._kickSteps.has(step)) {
+          const vel = isAccent
+            ? Math.round(baseVel * 1.15 + f.velocityVariance * 20 + fx * 12)
+            : Math.round(baseVel * 0.9  + f.velocityVariance * 10);
+          drum(kickNote, vel);
+        }
+
+        // Snare
+        if (!skip && this._snareSteps.has(step)) {
+          const vel = isAccent
+            ? Math.round(baseVel * 1.1  + f.velocityVariance * 15 + fx * 10)
+            : Math.round(baseVel * 0.85 + f.velocityVariance * 10);
+          drum(snareNote, vel);
+        }
+
+        // Ghost snare (always quiet, adds feel not presence)
+        if (this._ghostSteps.has(step) && Math.random() < 0.65) {
+          drum(snareNote, Math.round(28 + f.velocityVariance * 25 + Math.random() * 12));
+        }
+
+        // Hi-hat
+        if (this._hatSteps.has(step)) {
+          const isDownbeat = step % 4 === 0;
+          const hatVel = isDownbeat
+            ? Math.round(baseVel * 0.85 + fx * 10)
+            : Math.round(baseVel * 0.55 + Math.random() * 15);
+          // Burstiness can also drop individual hat hits for a looser feel
+          if (!f.burstiness > 0.6 || isDownbeat || Math.random() > f.burstiness * 0.3) {
+            drum(hatNote, hatVel);
+          }
+        }
+      },
+    },
   };
 
   // ── Pitch helpers for AI0008 ──────────────────────────────────────
@@ -708,14 +868,77 @@
     return /^AI\d{4}$/.test(code) && !!AI_BOTS[code];
   }
 
-  // Shared clock tick — drives every active bot in lockstep so they can
-  // never drift relative to each other, no matter when each was added.
+  // ── HUMAN FEEL ANALYSER ──────────────────────────────────────────
+  // Runs at every bar boundary on aiPrevBarBuf. Produces a normalised
+  // feel object that bots can read to adapt their playing style.
+  // All values are 0→1. Updated every bar, smoothed over 2 bars so
+  // transitions feel musical rather than jerky.
+
+  let _feel = {
+    density:          0.5,  // hits per bar (0 = silent, 1 = every 16th)
+    syncopation:      0.5,  // ratio of off-beat hits vs on-beat
+    velocityMean:     0.7,  // average velocity normalised 0→1
+    velocityVariance: 0.3,  // how dynamic (0 = robotic, 1 = very expressive)
+    burstiness:       0.3,  // playing in bursts with gaps (1) vs steady stream (0)
+    isSilent:         false, // true if no hits in last bar
+  };
+  window._relayFeel = _feel; // expose for any bot or future feature to read
+
+  function analyseHumanFeel(buf) {
+    if (!buf || buf.length === 0) {
+      // Smooth toward silent rather than jumping
+      _feel.density      = _feel.density      * 0.4;
+      _feel.isSilent     = _feel.density < 0.05;
+      window._relayFeel  = _feel;
+      return;
+    }
+
+    const hits     = buf.length;
+    const rawDensity = Math.min(hits / 16, 1); // 16 = max hits (every 16th)
+
+    // Syncopation: how many hits fall off the main beats (0,4,8,12)
+    const onBeats  = new Set([0, 4, 8, 12]);
+    const offCount = buf.filter(h => !onBeats.has(h.step)).length;
+    const rawSync  = hits > 0 ? offCount / hits : 0.5;
+
+    // Velocity stats
+    const vels     = buf.map(h => (h.velocity || 80) / 127);
+    const vMean    = vels.reduce((a, b) => a + b, 0) / vels.length;
+    const vVar     = vels.length > 1
+      ? Math.sqrt(vels.reduce((a, b) => a + (b - vMean) ** 2, 0) / vels.length)
+      : 0;
+
+    // Burstiness: measure clustering — are steps clumped or spread?
+    // Sort steps, measure gaps between consecutive hits
+    const steps    = buf.map(h => h.step).sort((a, b) => a - b);
+    let gapVar     = 0;
+    if (steps.length > 1) {
+      const gaps   = steps.slice(1).map((s, i) => s - steps[i]);
+      const gMean  = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+      gapVar       = Math.min(Math.sqrt(gaps.reduce((a, b) => a + (b - gMean) ** 2, 0) / gaps.length) / 8, 1);
+    }
+
+    // Smooth all values (70% new, 30% old) so changes feel gradual
+    const s = 0.7;
+    _feel.density          = rawDensity * s + _feel.density          * (1 - s);
+    _feel.syncopation      = rawSync    * s + _feel.syncopation      * (1 - s);
+    _feel.velocityMean     = vMean      * s + _feel.velocityMean     * (1 - s);
+    _feel.velocityVariance = Math.min(vVar * 2, 1) * s + _feel.velocityVariance * (1 - s);
+    _feel.burstiness       = gapVar     * s + _feel.burstiness       * (1 - s);
+    _feel.isSilent         = _feel.density < 0.05;
+    window._relayFeel      = _feel;
+  }
+
+  // Hook analyser into the bar boundary — runs just before bots get onBarStart
+
+
   function aiTick() {
     activeBots.forEach((bot) => { if (bot.onStep) bot.onStep.call(bot, aiStepIdx); });
     aiStepIdx++;
     if (aiStepIdx >= 16) {
       aiStepIdx = 0;
       aiBarIdx++;
+      analyseHumanFeel(aiHumanBuf); // analyse before swapping buffers
       aiPrevBarBuf = aiHumanBuf;
       aiHumanBuf = [];
       activeBots.forEach((bot) => { if (bot.onBarStart) bot.onBarStart.call(bot, aiBarIdx); });
@@ -762,7 +985,6 @@
     refreshAIStatusLabel();
     updateUI();
     showToast(`${bot.name} joined the jam — ${bot.desc}`);
-    if (typeof saveSettings === 'function') saveSettings();
   }
 
   function removeAIBot(code) {
@@ -783,7 +1005,6 @@
       refreshAIStatusLabel();
       updateUI();
     }
-    if (typeof saveSettings === 'function') saveSettings();
   }
 
   function stopAllAIBots() {
@@ -1041,11 +1262,6 @@
     get connected() {
       return !!(dataConn && dataConn.open);
     },
-
-    // Returns array of currently active bot codes — used by saveSettings
-    activeBotCodes() {
-      return Array.from(activeBots.keys());
-    },
   };
 
   window.RelayPeer = RelayPeer;
@@ -1202,7 +1418,6 @@
           <span id="rp-code-label">CODE</span>
           <span id="rp-code-val">——————</span>
           <button id="rp-copy-btn" title="Copy code">⎘</button>
-          <button id="rp-share-btn" title="Copy invite link">🔗</button>
         </div>
 
         <!-- Join input row (before session) -->
@@ -1214,7 +1429,8 @@
           AI0004 Piano (I–V–vi–IV) · AI0005 Pad (ii–V–I) · AI0006 Bass (walking)<br/>
           AI0007 Drums · AI0008 Lead (pitch-tracks you)<br/>
           AI0009 Drums (half-time) · AI0010 Drums (shuffle) · AI0011 Drums (jazz)<br/>
-          AI0012 Arpeggio · AI0013 Rhythm Stabs · AI0014 Call &amp; Response
+          AI0012 Arpeggio · AI0013 Rhythm Stabs · AI0014 Call &amp; Response<br/>
+          AI0015 Responsive Drums (adapts to your feel)
         </div>
 
         <!-- Active AI band members (band mode) -->
@@ -1261,13 +1477,6 @@
     document.getElementById('rp-copy-btn').addEventListener('click', () => {
       const code = document.getElementById('rp-code-val').textContent;
       navigator.clipboard.writeText(code).then(() => showToast('Code copied: ' + code));
-    });
-
-    document.getElementById('rp-share-btn').addEventListener('click', () => {
-      const code = document.getElementById('rp-code-val').textContent;
-      if (code === '——————') { showToast('Host a session first'); return; }
-      const url = location.origin + location.pathname + '?join=' + code;
-      navigator.clipboard.writeText(url).then(() => showToast('Invite link copied — send it to your jam partner'));
     });
   }
 
