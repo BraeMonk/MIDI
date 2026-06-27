@@ -526,9 +526,11 @@
     .pad[data-color="danger"] .pad-vel-bar { background: var(--danger); }
 
     /* ─── SAMPLES PANEL ──────────────────────────── */
-    #samples-panel .panel-scroll {
+    /* ─── PANEL SCROLL (all scrollable tab content) ─ */
+    .panel-scroll {
       flex: 1;
       overflow-y: auto;
+      overflow-x: hidden;
       -webkit-overflow-scrolling: touch;
       touch-action: pan-y;
       padding: 14px;
@@ -536,6 +538,8 @@
       flex-direction: column;
       gap: 14px;
       min-height: 0;
+      /* Ensure the element itself is the scroll container, not a pass-through */
+      overscroll-behavior: contain;
     }
 
     .section-head {
@@ -773,17 +777,7 @@
     .btn-modal.confirm { background: var(--teal-dim); border: 1px solid var(--teal); color: var(--teal); }
 
     /* ─── CONFIG PANEL ───────────────────────────── */
-    #config-panel .panel-scroll {
-      flex: 1;
-      overflow-y: auto;
-      -webkit-overflow-scrolling: touch;
-      touch-action: pan-y;
-      padding: 14px;
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-      min-height: 0;
-    }
+
 
     .config-group {
       background: var(--surface);
@@ -949,29 +943,7 @@
     ::-webkit-scrollbar { width: 3px; height: 3px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-    #amp-panel .panel-scroll {
-      flex: 1;
-      overflow-y: auto;
-      -webkit-overflow-scrolling: touch;
-      touch-action: pan-y;
-      padding: 14px;
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-      min-height: 0;
-    }
 
-    #looper-panel .panel-scroll {
-      flex: 1;
-      overflow-y: auto;
-      -webkit-overflow-scrolling: touch;
-      touch-action: pan-y;
-      padding: 14px;
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-      min-height: 0;
-    }
 
     /* ─── AMP SLIDERS ────────────────────────────── */
     .amp-slider {
@@ -983,7 +955,7 @@
       background: var(--border-hi);
       border-radius: 2px;
       outline: none;
-      touch-action: pan-x;
+      touch-action: pan-x pan-y;
     }
     .amp-slider::-webkit-slider-thumb {
       -webkit-appearance: none;
@@ -1032,17 +1004,8 @@
     .layer-item.rec-armed { border-color: var(--amber); }
 
     /* ─── FX PANEL ───────────────────────────────── */
-    #fx-panel .panel-scroll {
-      flex: 1;
-      overflow-y: auto;
-      -webkit-overflow-scrolling: touch;
-      touch-action: pan-y;
-      padding: 10px;
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      min-height: 0;
-    }
+    /* fx panel uses tighter padding */
+    #fx-panel .panel-scroll { padding: 10px; gap: 6px; }
 
     .pedal {
       background: var(--surface);
@@ -1151,7 +1114,7 @@
       background: var(--border-hi);
       border-radius: 2px;
       outline: none;
-      touch-action: pan-x;
+      touch-action: pan-x pan-y;
     }
     .fx-slider::-webkit-slider-thumb {
       -webkit-appearance: none;
