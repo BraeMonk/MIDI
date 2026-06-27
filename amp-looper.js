@@ -85,61 +85,46 @@ function buildCabIR(ctx, voice) {
     const sr   = ctx.sampleRate;
 
     // Layer 1: Early reflections — sparse impulses in the first 8ms
-    // model the wavefront bouncing off the cabinet baffle and back wall
+    // Alternating polarity models wavefronts bouncing off baffle and back wall.
+    // Slight L/R amplitude difference gives subtle stereo width.
     const earlyMs = [0, 1.2, 2.8, 4.1, 5.9, 7.3];
     earlyMs.forEach((ms, i) => {
       const idx = Math.floor(ms / 1000 * sr);
       if (idx < len) {
-        const sign = i % 2 === 0 ? 1 : -0.7; // alternating polarity from reflections
-        data[idx] += sign * Math.pow(0.72, i) * (ch === 0 ? 1 : 0.96); // slight L/R difference
+        const sign = i % 2 === 0 ? 1 : -0.7;
+        data[idx] += sign * Math.pow(0.72, i) * (ch === 0 ? 1 : 0.94);
       }
     });
 
-    // Layer 2: Speaker cone resonance — decaying sine at cone breakup frequency
-    // This is the primary character of the speaker (e.g. Celestion G12)
-    const coneFreq = p.cone;
-    const coneStep = 2 * Math.PI * coneFreq / sr;
-    for (let i = 0; i < len; i++) {
-      const env = Math.pow(0.9998, i) * Math.exp(-i / (sr * 0.04));
-      data[i] += Math.sin(i * coneStep) * env * 0.35;
-    }
-
-    // Layer 3: Box resonance — cabinet body mode (lower frequency, longer decay)
-    const boxFreq = p.box;
-    for (let i = 0; i < len; i++) {
-      const env = Math.exp(-i / (sr * 0.12)) * Math.pow(0.9999, i);
-      data[i] += Math.sin(2 * Math.PI * boxFreq * i / sr) * env * 0.25;
-    }
-
-    // Layer 4: Diffuse tail — exponentially decaying noise models late reflections
-    // inside the cabinet and mic room ambience
+    // Layer 2: Shaped noise tail — exponentially decaying noise with a
+    // voice-specific decay time. This is the diffuse energy of the cabinet
+    // and mic room. No pitched tones — that was the drone source, removed.
+    const decaySec = p.ms / 1000 * 0.5;
     for (let i = 0; i < len; i++) {
       const noise = (Math.random() * 2 - 1);
-      const env   = Math.exp(-i / (sr * p.ms * 0.001 * 0.4));
-      data[i] += noise * env * 0.08;
+      const env   = Math.exp(-i / (sr * decaySec));
+      data[i] += noise * env * 0.15;
     }
 
-    // Layer 5: Air absorption — high-frequency rolloff increases with distance/time
-    // Apply a simple first-order IIR LPF that gets progressively stronger
+    // Layer 3: Air absorption — time-varying LPF darkens the tail progressively,
+    // models high-frequency loss as energy disperses across the cab interior.
     let lp = 0;
     for (let i = 0; i < len; i++) {
-      const fc = 1 - (i / len) * p.air; // cutoff drifts from 1.0 down to (1-air)
+      const fc = 1 - (i / len) * p.air;
       lp = lp + fc * (data[i] - lp);
       data[i] = lp;
     }
 
-    // Layer 6: Proximity effect — boost low-end in early samples (mic close to cone)
-    // Simple running average adds warmth to the attack
+    // Layer 4: Proximity warmth — brief low-end bloom in the first ~3ms,
+    // models a mic placed close to the cone picking up proximity effect.
     let proximity = 0;
     for (let i = 0; i < len; i++) {
-      const blend = p.prox * Math.exp(-i / (sr * 0.003)); // fades out in ~3ms
+      const blend = p.prox * Math.exp(-i / (sr * 0.003));
       proximity = proximity * 0.85 + data[i] * 0.15;
       data[i] += proximity * blend;
     }
 
-    // RMS-normalize to a consistent target level so cab-on and cab-off match in
-    // perceived loudness. Peak normalization (what Web Audio does with normalize=true)
-    // gets thrown off by the early-reflection spikes and makes the cab signal too quiet.
+    // RMS-normalize so cab-on volume matches cab-off (bypass) volume.
     const TARGET_RMS = 0.18;
     let sumSq = 0;
     for (let i = 0; i < len; i++) sumSq += data[i] * data[i];
